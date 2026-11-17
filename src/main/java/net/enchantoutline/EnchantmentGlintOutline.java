@@ -190,9 +190,10 @@ public class EnchantmentGlintOutline implements ModInitializer {
 
 		EquipmentRendererQueueEnchantedCallback.EVENT.register((( queueHolder, renderedStack, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
 			//I can build this using the current renderLayer the model class is surprisingly simple. It just is made of a model part which I already am able to render an outline for. just build a new model every frame and we should be set
-			//26.3: armour glint is part of the layer render type now, so only the enchanted (glint) layer of a
-			//foiled piece of armour passes this check - exactly the layers that used to be glint submits.
-			if(config.isEnabled() && RenderLayerHelper.isGlintRenderType(renderLayer)){
+			//26.3: armour glint is part of the layer render type now. The hooked submit is always the armour
+			//layer itself, so the stack's foil flag is the reliable "is enchanted" signal (it also covers
+			//trimmed armour, which never gets a glint layer type).
+			if(config.isEnabled() && (RenderLayerHelper.isGlintRenderType(renderLayer) || (renderedStack != null && renderedStack.hasFoil()))){
 				@Nullable ItemOverride override = null;
 				if(renderedStack != null){
 					override = getOverrideFromNullableItem(config::getArmorOverride, renderedStack.getItem());
