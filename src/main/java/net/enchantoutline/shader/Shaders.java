@@ -52,7 +52,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_DEPTH_CULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_depth_cull"))
                     .withCull(true)
                     .withColorTargetState(NO_COLOR)
                     .withDepthStencilState(DEPTH_WRITE)
@@ -62,7 +62,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_COLOR_CULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_color_cull"))
                     .withCull(true)
                     .withColorTargetState(WRITE_COLOR)
                     .withDepthStencilState(NO_DEPTH_WRITE)
@@ -72,7 +72,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_DEPTH_NOCULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_depth_nocull"))
                     .withCull(false)
                     .withColorTargetState(NO_COLOR)
                     .withDepthStencilState(DEPTH_WRITE)
@@ -82,7 +82,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_COLOR_NOCULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_color_nocull"))
                     .withCull(false)
                     .withColorTargetState(WRITE_COLOR)
                     .withDepthStencilState(NO_DEPTH_WRITE)
@@ -196,7 +196,11 @@ public class Shaders {
     }
 
     public static RenderType createZFixRenderLayerCull(Map<String, Identifier> specMap) {//TextureSpec
-        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_CULL);
+        //26.3 binds textures by name into a fixed bind-group layout, so Sampler2 has to be present even
+        //for the depth-only pass (the outline shader samples the lightmap in the vertex stage).
+        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_CULL)
+                .useLightmap()
+                .affectsCrumbling();
 
         for(var entry : specMap.entrySet()) {
             builder = builder.withTexture("Sampler0", entry.getValue());
@@ -206,7 +210,9 @@ public class Shaders {
     }
 
     public static RenderType createZFixRenderLayerNoCull(Map<String, Identifier> specMap) {//TextureSpec
-        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_NOCULL);
+        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_NOCULL)
+                .useLightmap()
+                .affectsCrumbling();
 
         for(var entry : specMap.entrySet()) {
             builder = builder.withTexture("Sampler0", entry.getValue());
