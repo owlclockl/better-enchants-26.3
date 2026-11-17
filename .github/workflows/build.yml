@@ -69,22 +69,20 @@ jobs:
         if: success()
         shell: bash
         run: |
-          for jar in build/libs/*.jar; do
-            echo "## $jar ($(stat -c%s "$jar") bytes)"
-          done
+          set +e
+          ls -l build/libs
           main_jar=$(find build/libs -maxdepth 1 -type f -name 'enchantment-glint-outline-*.jar' ! -name '*-sources.jar' -print -quit)
           {
             echo "jar: $main_jar"
-            unzip -l "$main_jar" | tail -n +4 | head -n 40
-            echo "--- fabric.mod.json version ---"
-            unzip -p "$main_jar" fabric.mod.json | head -n 8
-          } > jar-report.txt
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path("jar-report.txt").read_text(errors="replace")[-4000:]
-          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::notice title=Built jar::{escaped}")
-          PY
+            jar tf "$main_jar" 2>/dev/null | head -n 40 || unzip -l "$main_jar" | head -n 40
+            echo "--- fabric.mod.json ---"
+            unzip -p "$main_jar" fabric.mod.json 2>/dev/null | head -n 24 || true
+            echo "--- mixins / refmap ---"
+            jar tf "$main_jar" 2>/dev/null | grep -Ei 'refmap|mixins.json|accesswidener' || true
+          } > jar-report.txt 2>&1
+          python3 -c "import pathlib; t=pathlib.Path('jar-report.txt').read_text(errors='replace')[-3500:]; print('::notice title=Built jar::'+t.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A'))"
+          cat jar-report.txt
+          exit 0
 
       - name: Upload build artifacts
         if: success()
