@@ -1,0 +1,14 @@
+{
+	"required": false,
+	"minVersion": "0.8",
+	"package": "net.ghastpilot.mixin.xaero",
+	"compatibilityLevel": "JAVA_25",
+	"plugin": "net.ghastpilot.mixin.xaero.XaeroMixinPlugin",
+	"client": [
+		"GuiMapMixin",
+		"WaypointReaderMixin"
+	],
+	"injectors": {
+		"defaultRequire": 0
+	}
+}

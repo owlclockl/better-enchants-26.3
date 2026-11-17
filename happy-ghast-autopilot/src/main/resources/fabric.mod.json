@@ -1,0 +1,36 @@
+{
+	"schemaVersion": 1,
+	"id": "happy-ghast-autopilot",
+	"version": "${version}",
+	"name": "Happy Ghast Autopilot",
+	"description": "Автопилот для добрых гастов с выбором точки полёта на Xaero's World Map, обходом препятствий, свободным обзором и HUD. / Smart autopilot for Happy Ghasts with Xaero's World Map click-to-fly integration, obstacle avoidance, free look, and HUD.",
+	"authors": [
+		"owlclockl"
+	],
+	"license": "MIT",
+	"icon": "assets/happy-ghast-autopilot/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"net.ghastpilot.HappyGhastAutopilotClient"
+		],
+		"modmenu": [
+			"net.ghastpilot.client.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		"happy-ghast-autopilot.mixins.json",
+		"happy-ghast-autopilot-xaero.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"xaeroworldmap": "*",
+		"xaerominimap": "*",
+		"modmenu": "*"
+	}
+}

@@ -1,0 +1,178 @@
+name: happy-ghast-autopilot
+
+on:
+  push:
+    paths:
+      - 'happy-ghast-autopilot/**'
+      - '.github/workflows/happy-ghast-autopilot.yml'
+  pull_request:
+    paths:
+      - 'happy-ghast-autopilot/**'
+      - '.github/workflows/happy-ghast-autopilot.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: happy-ghast-autopilot
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: 'gradle'
+          cache-dependency-path: |
+            happy-ghast-autopilot/build.gradle
+            happy-ghast-autopilot/gradle.properties
+            happy-ghast-autopilot/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build and test mod
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon build > build-output.log 2>&1
+          build_status=$?
+          cat build-output.log
+          if [ "$build_status" -ne 0 ]; then
+            echo "=== COMPILER / GRADLE ERROR SUMMARY ==="
+            grep -n -C 4 -E "error:|FAILURE:|What went wrong|Exception" build-output.log | tail -n 160 || true
+            # Also inspect real 26.3 signatures if compilation failed on a shifted API
+            mc_jar=$(find ~/.gradle/caches -name "*minecraft*26.3*.jar" ! -name "*-sources*" | head -n 1)
+            if [ -n "$mc_jar" ]; then
+              echo "=== MC JAR: $mc_jar ==="
+              javap -cp "$mc_jar" -p net.minecraft.client.Minecraft 2>/dev/null | grep -E "screen|Screen|gui|window" | head -n 40 || true
+              javap -cp "$mc_jar" -p net.minecraft.client.gui.Gui 2>/dev/null | grep -E "screen|Screen|Overlay|hud" | head -n 40 || true
+              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast 2>/dev/null || true
+            fi
+            exit "$build_status"
+          fi
+
+      - name: Verify bytecode against Minecraft 26.3 and Xaero's World Map 26.3
+        if: success()
+        shell: bash
+        run: |
+          set -e
+          echo "=== Built artifacts ==="
+          ls -lh build/libs
+          main_jar=$(find build/libs -maxdepth 1 -type f -name 'happy-ghast-autopilot-*.jar' ! -name '*-sources.jar' -print -quit)
+          test -n "$main_jar"
+          echo "=== JAR contents ==="
+          jar tf "$main_jar"
+          echo "=== fabric.mod.json ==="
+          unzip -p "$main_jar" fabric.mod.json
+
+          echo "=== Verify HappyGhast bytecode (26.3) ==="
+          mc_jar=$(find ~/.gradle/caches -type f -name "*.jar" ! -name "*-sources.jar" -exec sh -c 'jar tf "$1" 2>/dev/null | grep -q "^net/minecraft/world/entity/animal/happyghast/HappyGhast.class$"' _ {} \; -print -quit)
+          echo "Found MC jar: $mc_jar"
+          if [ -n "$mc_jar" ]; then
+            javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | grep -A 35 -E "tickRidden|getRiddenInput|getControllingPassenger|createPlayerRotation|travelRidden" || true
+          fi
+
+          echo "=== Verify Xaero's World Map 26.3 (GuiMap, WaypointReader, Waypoint, MapWorld) ==="
+          xaero_jar=$(find ~/.gradle/caches -type f -name "*NcUtCpym*.jar" -o -name "*xaeroworldmap*.jar" | head -n 1)
+          echo "Found Xaero jar: $xaero_jar"
+          if [ -n "$xaero_jar" ]; then
+            echo "--- GuiMap fields & target methods ---"
+            javap -cp "$xaero_jar" -p xaero.map.gui.GuiMap | grep -E "rightClick|mouseBlock|camera|scale|screenScale|mapProcessor|getRightClickOptions|renderPreDropdown|onInputPress" || true
+            echo "--- GuiMap getRightClickOptions bytecode (head) ---"
+            javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | grep -A 45 "getRightClickOptions(" | head -n 50 || true
+            echo "--- WaypointReader ---"
+            javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader || true
+            echo "--- Waypoint ---"
+            javap -cp "$xaero_jar" -p xaero.map.mods.gui.Waypoint || true
+            echo "--- MapWorld ---"
+            javap -cp "$xaero_jar" -p xaero.map.world.MapWorld | grep -E "Dimension|dimension|Scale|Div" || true
+            echo "--- MapDimension ---"
+            javap -cp "$xaero_jar" -p xaero.map.world.MapDimension | grep -E "Dim|Scale|Div|calculate" || true
+          fi
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: happy-ghast-autopilot-26.3
+          path: happy-ghast-autopilot/build/libs/*.jar
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release-autopilot]')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download built mod JARs
+        uses: actions/download-artifact@v4
+        with:
+          name: happy-ghast-autopilot-26.3
+          path: happy-ghast-autopilot/build/libs
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: happy-ghast-autopilot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mod_version=$(awk -F= '$1 == "mod_version" {print $2}' gradle.properties)
+          minecraft_version=$(awk -F= '$1 == "minecraft_version" {print $2}' gradle.properties)
+          release_tag="happy-ghast-autopilot-${mod_version}+${minecraft_version}"
+          artifact=$(find build/libs -maxdepth 1 -type f -name 'happy-ghast-autopilot-*.jar' ! -name '*-sources.jar' -print -quit)
+          test -n "$artifact"
+          echo "Publishing release $release_tag with $artifact ($(stat -c%s "$artifact") bytes)"
+          sha256sum "$artifact"
+
+          cat > release-notes.md <<EOF
+          **Happy Ghast Autopilot ${mod_version} — автопилот для добрых гастов (Minecraft ${minecraft_version}, Fabric).**
+
+          ### Совместимость
+          * Minecraft **${minecraft_version}**
+          * Fabric Loader **0.19.5+**, Fabric API **0.166.2+26.3**
+          * Java **25**
+          * **Xaero's World Map** (поддержка 26.3 — опционально, рекомендуется) + поддержка меток Xaero's Minimap на карте мира
+          * **Mod Menu** (опционально — открывает меню настроек)
+          * Полностью клиентский мод — работает и в одиночной игре, и на серверах.
+
+          ### Возможности
+          * **Выбор точки прямо на Xaero's World Map:** нажмите **ПКМ** по любому месту на карте мира и выберите **«Лететь на гасте (X, Z)»** (крейсерский полёт) или **«Лететь с посадкой (X, Y, Z)»** (плавное снижение к поверхности в точке прибытия). Также можно нажать ПКМ по любой метке (вейпоинту) на карте!
+          * **Маршрут и метка на карте:** рисует пунктирную линию полёта и прицел цели с дистанцией прямо на Xaero's World Map.
+          * **Умный полёт и обход препятствий:** автоматический набор высоты над горами/лесами, обход препятствий в Незере и под потолками, защита от лавы и непрогруженных чанков, плавное торможение у цели.
+          * **Свободный обзор (Free Look):** крутите камерой, открывайте инвентарь, чат или карту мира — гаст продолжает ровно лететь к цели. При нажатии WASD автопилот мгновенно встаёт на паузу.
+          * **Удобный HUD, меню и команды:** отображение дистанции, скорости и времени прибытия (ETA), русская и английская локализация.
+
+          ### Управление
+          * **ПКМ на Xaero's World Map** → *«Лететь на гасте»* / *«Лететь с посадкой»* / *«Лететь на гасте к метке»*
+          * **\`G\`** — включить / поставить на паузу автопилот (перенастраивается в настройках управления)
+          * **\`H\`** — открыть меню автопилота (ввод координат, вставка из буфера F3+C / вейпоинтов Xaero, недавние цели, настройки)
+          * **\`/gp <x> <z>\`** или **\`/gp <x> <y> <z>\`** — полететь к координатам (\`/gp stop\`, \`/gp resume\`, \`/gp clear\`, \`/gp altitude <y|auto>\`, \`/gp freelook <true|false>\`, \`/gp status\`)
+
+          ### Установка
+          Скопируйте \`happy-ghast-autopilot-${mod_version}.jar\` в папку \`.minecraft/mods/\` (нужен Fabric Loader 0.19.5+ и Fabric API для 26.3; для выбора точки на карте — Xaero's World Map для 26.3).
+          EOF
+          sed -i 's/^          //' release-notes.md
+
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$release_tag" "$artifact" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" \
+              --title "Happy Ghast Autopilot ${mod_version} for Minecraft ${minecraft_version}" \
+              --notes-file release-notes.md
+          else
+            gh release create "$release_tag" "$artifact" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Happy Ghast Autopilot ${mod_version} for Minecraft ${minecraft_version}" \
+              --notes-file release-notes.md
+          fi

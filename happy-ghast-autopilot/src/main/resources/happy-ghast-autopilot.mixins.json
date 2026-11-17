@@ -1,0 +1,12 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "net.ghastpilot.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"HappyGhastMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
