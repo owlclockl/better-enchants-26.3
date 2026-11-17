@@ -3,24 +3,26 @@ package net.ghastpilot.mixin;
 import net.ghastpilot.client.AutopilotController;
 import net.ghastpilot.flight.SteeringCommand;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.animal.happyghast.HappyGhast;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Steers the local player's harnessed Happy Ghast when autopilot is engaged.
  *
- * <p>Uses the exact vanilla Happy Ghast flying-speed formula so movement remains 100% vanilla-legal
- * in both singleplayer and multiplayer (including unmodified vanilla servers), while allowing the
- * rider to freely look around, chat, check inventory, or browse Xaero's World Map mid-flight.
+ * <p>Hooks {@code getRiddenRotation} and {@code getRiddenInput} using the exact vanilla Happy Ghast
+ * speed formula ({@code 3.9F * Attributes.FLYING_SPEED}), keeping movement 100% vanilla-legal in both
+ * singleplayer and multiplayer while letting the player look around freely, chat, open inventory,
+ * or browse Xaero's World Map mid-flight.
  */
 @Mixin(HappyGhast.class)
 public abstract class HappyGhastMixin extends Animal {
@@ -29,19 +31,16 @@ public abstract class HappyGhastMixin extends Animal {
 		super(entityType, level);
 	}
 
-	@Inject(method = "tickRidden", at = @At("HEAD"), cancellable = true)
-	private void ghastpilot$onTickRidden(Player player, Vec3 travelVector, CallbackInfo ci) {
-		if (!this.level().isClientSide()) {
+	@Inject(method = "getRiddenRotation", at = @At("HEAD"), cancellable = true)
+	private void ghastpilot$onGetRiddenRotation(LivingEntity rider, CallbackInfoReturnable<Vec2> cir) {
+		if (!this.level().isClientSide() || !(rider instanceof Player player)) {
 			return;
 		}
 		SteeringCommand cmd = AutopilotController.getActiveCommandFor((HappyGhast) (Object) this, player);
 		if (cmd == null) {
 			return;
 		}
-		super.tickRidden(player, travelVector);
-		this.setRot(cmd.yaw(), cmd.pitch() * 0.5f);
-		this.yRotO = this.yBodyRot = this.yHeadRot = this.getYRot();
-		ci.cancel();
+		cir.setReturnValue(new Vec2(cmd.pitch() * 0.5f, cmd.yaw()));
 	}
 
 	@Inject(method = "getRiddenInput", at = @At("HEAD"), cancellable = true)

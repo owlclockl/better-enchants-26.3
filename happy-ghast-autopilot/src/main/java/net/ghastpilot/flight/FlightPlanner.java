@@ -101,9 +101,8 @@ public final class FlightPlanner {
 				}
 				// Point toward (target.centerX, target.centerZ) so the tiny cos(83deg) horizontal component
 				// keeps the Happy Ghast centered directly over the target column while descending.
-				float descendYaw = horizDist > 0.25
-						? approachAngle(currentYaw, targetYaw, MAX_YAW_STEP * 1.5f)
-						: currentYaw;
+				// Vanilla HappyGhast#tickRidden smoothly damps yaw toward cmd.yaw() (diff * 0.08f per tick).
+				float descendYaw = horizDist > 0.25 ? targetYaw : currentYaw;
 				float descendPitch = approachAngle(currentPitch, 83.0f, MAX_PITCH_STEP * 1.5f);
 				// Wait until pitched cleanly downward before pushing forward so we don't drift off target.
 				float fwd = descendPitch >= 55.0f
@@ -115,46 +114,40 @@ public final class FlightPlanner {
 
 		// 2. Pause in place if the chunk ahead hasn't streamed in yet
 		if (!scan.chunkAheadLoaded() && horizDist > 8.0) {
-			float nextYaw = approachAngle(currentYaw, targetYaw, MAX_YAW_STEP);
-			return SteeringCommand.hold(nextYaw, FlightPhase.WAITING_CHUNKS, y);
+			return SteeringCommand.hold(targetYaw, FlightPhase.WAITING_CHUNKS, y);
 		}
 
 		// 3. Emergency hazard avoidance (lava / fire / void right below)
 		if (scan.hazardBelow() && scan.canAscend()) {
-			float nextYaw = approachAngle(currentYaw, targetYaw, MAX_YAW_STEP);
 			float nextPitch = approachAngle(currentPitch, -40.0f, MAX_PITCH_STEP);
 			float fwd = scan.immediateObstacleAhead() ? 0.0f : 0.75f;
-			return new SteeringCommand(false, nextYaw, nextPitch, fwd, 0.0f, true, FlightPhase.CLIMBING, y + 6.0);
+			return new SteeringCommand(false, targetYaw, nextPitch, fwd, 0.0f, true, FlightPhase.CLIMBING, y + 6.0);
 		}
 
 		// 4. Immediate obstacle or stuck recovery
 		if (scan.immediateObstacleAhead() || stuckTicks >= 35) {
 			// Prefer climbing vertically in open sky, or whenever no clean lateral gap exists.
 			if (scan.canAscend() && (!scan.hasCeiling() || scan.clearDetourYaw() == null)) {
-				float nextYaw = approachAngle(currentYaw, targetYaw, MAX_YAW_STEP);
 				float nextPitch = approachAngle(currentPitch, -42.0f, MAX_PITCH_STEP);
-				return new SteeringCommand(false, nextYaw, nextPitch, 0.0f, 0.0f, true, FlightPhase.CLIMBING, y + 8.0);
+				return new SteeringCommand(false, targetYaw, nextPitch, 0.0f, 0.0f, true, FlightPhase.CLIMBING, y + 8.0);
 			}
 			// Under a ceiling (Nether / cave / overhang), steer through the clearest lateral opening.
 			if (scan.clearDetourYaw() != null) {
 				float detourYaw = scan.clearDetourYaw();
-				float nextYaw = approachAngle(currentYaw, detourYaw, MAX_YAW_STEP);
-				float err = Math.abs(angleDelta(nextYaw, detourYaw));
+				float err = Math.abs(angleDelta(currentYaw, detourYaw));
 				float nextPitch = approachAngle(currentPitch, 0.0f, MAX_PITCH_STEP);
-				float fwd = err <= 35.0f ? 0.85f : 0.0f;
-				return new SteeringCommand(false, nextYaw, nextPitch, fwd, 0.0f, false, FlightPhase.AVOIDING, y);
+				float fwd = err <= 40.0f ? 0.85f : 0.0f;
+				return new SteeringCommand(false, detourYaw, nextPitch, fwd, 0.0f, false, FlightPhase.AVOIDING, y);
 			}
 			// Try ducking cleanly under a low overhang if space below is safe.
 			if (scan.canDescend() && !scan.hazardBelow()) {
-				float nextYaw = approachAngle(currentYaw, targetYaw, MAX_YAW_STEP);
 				float nextPitch = approachAngle(currentPitch, 74.0f, MAX_PITCH_STEP * 1.25f);
 				float fwd = nextPitch >= 50.0f ? 0.55f : 0.0f;
-				return new SteeringCommand(false, nextYaw, nextPitch, fwd, 0.0f, false, FlightPhase.AVOIDING, y - 4.0);
+				return new SteeringCommand(false, targetYaw, nextPitch, fwd, 0.0f, false, FlightPhase.AVOIDING, y - 4.0);
 			}
 			// Last resort: gentle sidestep while stuck detector tracks progress.
 			float strafe = (preferredDetourSign >= 0 ? 1.0f : -1.0f) * 0.75f;
-			float nextYaw = approachAngle(currentYaw, targetYaw, MAX_YAW_STEP);
-			return new SteeringCommand(false, nextYaw, 0.0f, 0.0f, strafe, scan.canAscend(), FlightPhase.AVOIDING, y);
+			return new SteeringCommand(false, targetYaw, 0.0f, 0.0f, strafe, scan.canAscend(), FlightPhase.AVOIDING, y);
 		}
 
 		// 5. Compute desired cruise altitude
@@ -163,15 +156,14 @@ public final class FlightPlanner {
 			desiredY = Math.max(desiredY, Math.min(y + 6.0, settings.worldMaxY() - WORLD_CEILING_MARGIN));
 		}
 
-		// 6. Choose steering heading (follow lateral detour early in closed spaces)
+		// 6. Choose steering heading (HappyGhast#tickRidden applies vanilla 0.08f/tick rotational damping)
 		boolean usingDetour = false;
 		float desiredYaw = targetYaw;
 		if (scan.nearObstacleAhead() && (scan.hasCeiling() || !scan.canAscend()) && scan.clearDetourYaw() != null) {
 			desiredYaw = scan.clearDetourYaw();
 			usingDetour = true;
 		}
-		float nextYaw = approachAngle(currentYaw, desiredYaw, MAX_YAW_STEP);
-		float yawError = Math.abs(angleDelta(nextYaw, desiredYaw));
+		float yawError = Math.abs(angleDelta(currentYaw, desiredYaw));
 
 		// 7. Compute smooth pitch & vertical jump boost to hold desiredY without oscillation
 		double dy = desiredY - y;
@@ -220,7 +212,7 @@ public final class FlightPlanner {
 			phase = FlightPhase.CRUISING;
 		}
 
-		return new SteeringCommand(false, nextYaw, nextPitch, forward, 0.0f, jump, phase, desiredY);
+		return new SteeringCommand(false, desiredYaw, nextPitch, forward, 0.0f, jump, phase, desiredY);
 	}
 
 	public static double computeDesiredCruiseY(

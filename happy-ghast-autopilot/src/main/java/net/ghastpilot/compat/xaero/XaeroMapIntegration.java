@@ -22,7 +22,6 @@ import xaero.map.world.MapWorld;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Handles right-click destination selection, waypoint targeting, and route/pin overlay rendering
@@ -30,7 +29,8 @@ import java.util.List;
  */
 public final class XaeroMapIntegration {
 
-	/** Xaero uses Short.MAX_VALUE (32767) or -1/invalid out-of-world Y when height at cursor is unknown. */
+	/** Xaero uses Short.MAX_VALUE (32767) when height at the right-clicked tile is unknown. */
+	private static final int XAERO_UNKNOWN_Y = Short.MAX_VALUE;
 	private static final int MIN_VALID_MAP_Y = -2048;
 	private static final int MAX_VALID_MAP_Y = 4096;
 
@@ -74,7 +74,8 @@ public final class XaeroMapIntegration {
 
 		final int targetX = xObj;
 		final int targetZ = zObj;
-		final Integer landingY = (yObj != null && yObj >= MIN_VALID_MAP_Y && yObj <= MAX_VALID_MAP_Y)
+		final Integer landingY = (yObj != null && yObj != XAERO_UNKNOWN_Y
+				&& yObj >= MIN_VALID_MAP_Y && yObj <= MAX_VALID_MAP_Y)
 				? (yObj + 1)
 				: null;
 		final String dimension = resolveRightClickDimension(guiMap);
@@ -85,14 +86,13 @@ public final class XaeroMapIntegration {
 				.equals(FlightTarget.normalizeDimension(AutopilotController.getPlayerDimension(client)));
 
 		IRightClickableElement clickableMap = (IRightClickableElement) (Object) guiMap;
-		List<RightClickOption> toInsert = new ArrayList<>(3);
 
 		// Option 1: Fly at safe cruise altitude to (X, Z)
 		String flyKey = drivingGhast
 				? "happy_ghast_autopilot.xaero.fly_here"
 				: "happy_ghast_autopilot.xaero.set_target";
-		String flyLabel = escapePercent(Component.translatable(flyKey, targetX, targetZ).getString());
-		toInsert.add(new RightClickOption(flyLabel, options.size(), clickableMap) {
+		String flyLabel = "» " + escapePercent(Component.translatable(flyKey, targetX, targetZ).getString());
+		options.add(new RightClickOption(flyLabel, options.size(), clickableMap) {
 			@Override
 			public void onAction(Screen screen) {
 				selectFromMap(new FlightTarget(targetX, null, targetZ, dimension, null), screen);
@@ -104,8 +104,8 @@ public final class XaeroMapIntegration {
 			String landKey = drivingGhast
 					? "happy_ghast_autopilot.xaero.fly_here_y"
 					: "happy_ghast_autopilot.xaero.set_target_y";
-			String landLabel = escapePercent(Component.translatable(landKey, targetX, landingY, targetZ).getString());
-			toInsert.add(new RightClickOption(landLabel, options.size() + 1, clickableMap) {
+			String landLabel = "» " + escapePercent(Component.translatable(landKey, targetX, landingY, targetZ).getString());
+			options.add(new RightClickOption(landLabel, options.size(), clickableMap) {
 				@Override
 				public void onAction(Screen screen) {
 					AutopilotConfig.get().descendOnArrival = true;
@@ -116,20 +116,16 @@ public final class XaeroMapIntegration {
 
 		// Option 3: Clear current destination if one is set
 		if (AutopilotController.getTarget() != null) {
-			String clearLabel = escapePercent(
+			String clearLabel = "✕ " + escapePercent(
 					Component.translatable("happy_ghast_autopilot.xaero.clear_target").getString()
 			);
-			toInsert.add(new RightClickOption(clearLabel, options.size() + toInsert.size(), clickableMap) {
+			options.add(new RightClickOption(clearLabel, options.size(), clickableMap) {
 				@Override
 				public void onAction(Screen screen) {
 					AutopilotController.clearTarget(true);
 				}
 			});
 		}
-
-		// Place right near the top (just below the coordinate header) while preserving proper option indices
-		int insertPos = Math.min(2, options.size());
-		options.addAll(insertPos, toInsert);
 	}
 
 	public static void appendWaypointOptions(
@@ -137,9 +133,18 @@ public final class XaeroMapIntegration {
 			IRightClickableElement target,
 			ArrayList<RightClickOption> options
 	) {
-		final int wx = waypoint.getX();
-		final int wz = waypoint.getZ();
-		final Integer wy = waypoint.isyIncluded() && waypoint.getY() >= MIN_VALID_MAP_Y && waypoint.getY() <= MAX_VALID_MAP_Y
+		// Use getRenderX/getRenderZ so cross-dimension (e.g. Nether<->Overworld) waypoints
+		// automatically use Xaero's dimension-divided coordinates for the viewed map.
+		double rx = waypoint.getRenderX();
+		double rz = waypoint.getRenderZ();
+		final int wx = Double.isFinite(rx) ? (int) Math.floor(rx) : waypoint.getX();
+		final int wz = Double.isFinite(rz) ? (int) Math.floor(rz) : waypoint.getZ();
+		boolean sameDimScale = (wx == waypoint.getX() && wz == waypoint.getZ());
+		final Integer wy = (sameDimScale
+				&& waypoint.isyIncluded()
+				&& waypoint.getY() != XAERO_UNKNOWN_Y
+				&& waypoint.getY() >= MIN_VALID_MAP_Y
+				&& waypoint.getY() <= MAX_VALID_MAP_Y)
 				? waypoint.getY()
 				: null;
 		final String wpName = waypoint.getName();
@@ -150,17 +155,14 @@ public final class XaeroMapIntegration {
 				? resolveMapDimension(guiMap)
 				: AutopilotController.getPlayerDimension(client);
 
-		String label = escapePercent(Component.translatable("happy_ghast_autopilot.xaero.fly_waypoint").getString());
-		RightClickOption option = new RightClickOption(label, options.size(), target) {
+		String label = "» " + escapePercent(Component.translatable("happy_ghast_autopilot.xaero.fly_waypoint").getString());
+		options.add(new RightClickOption(label, options.size(), target) {
 			@Override
 			public void onAction(Screen screen) {
 				String dim = ((Object) screen instanceof GuiMap gm) ? resolveMapDimension(gm) : dimension;
 				selectFromMap(new FlightTarget(wx, wy, wz, dim, wpName), screen);
 			}
-		};
-
-		int insertPos = Math.min(3, options.size());
-		options.add(insertPos, option);
+		});
 	}
 
 	private static void selectFromMap(FlightTarget chosen, Screen mapScreen) {

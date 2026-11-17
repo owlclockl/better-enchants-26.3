@@ -31,7 +31,9 @@ public final class AutopilotController {
 	private static FlightPhase phase = FlightPhase.IDLE;
 	private static SteeringCommand activeCommand;
 	private static float virtualPitch;
+	private static double baseCruiseY = Double.NaN;
 	private static double sessionCruiseY = Double.NaN;
+	private static int altitudeHoldTicks;
 
 	// Live speed smoothing
 	private static double lastX = Double.NaN;
@@ -211,7 +213,9 @@ public final class AutopilotController {
 		active = true;
 		phase = FlightPhase.CRUISING;
 		virtualPitch = 0.0f;
+		baseCruiseY = ridden.getY();
 		sessionCruiseY = ridden.getY();
+		altitudeHoldTicks = 0;
 		manualInputGraceTicks = 8; // brief grace window after engaging via hotkey/map
 		lastX = ridden.getX();
 		lastY = ridden.getY();
@@ -260,7 +264,9 @@ public final class AutopilotController {
 	}
 
 	private static void resetFlightTracking() {
+		baseCruiseY = Double.NaN;
 		sessionCruiseY = Double.NaN;
+		altitudeHoldTicks = 0;
 		virtualPitch = 0.0f;
 		lastX = Double.NaN;
 		lastY = Double.NaN;
@@ -355,8 +361,11 @@ public final class AutopilotController {
 		lastY = gy;
 		lastZ = gz;
 
+		if (!Double.isFinite(baseCruiseY)) {
+			baseCruiseY = gy;
+		}
 		if (!Double.isFinite(sessionCruiseY)) {
-			sessionCruiseY = gy;
+			sessionCruiseY = baseCruiseY;
 		}
 
 		double horizDist = target.horizontalDistanceTo(gx, gz);
@@ -431,10 +440,26 @@ public final class AutopilotController {
 			return;
 		}
 
-		// Raise session cruise altitude softly when climbing over tall mountain ranges in auto mode,
-		// so the ghast doesn't immediately dip into small crevices between peaks.
-		if (!cfg.useFixedCruiseAltitude && !scan.hasCeiling() && cmd.desiredY() > sessionCruiseY) {
-			sessionCruiseY = Math.min(cmd.desiredY(), sessionCruiseY + 0.35);
+		// Smoothly plateau cruise altitude over consecutive peaks, then gently relax back toward baseCruiseY
+		// once open lowlands return so the ghast never stays stranded at cloud level after one mountain.
+		if (!cfg.useFixedCruiseAltitude && !scan.hasCeiling()) {
+			double terrainFloor = baseCruiseY;
+			if (!Double.isNaN(scan.highestTerrainAhead())) {
+				terrainFloor = Math.max(terrainFloor, scan.highestTerrainAhead() + cfg.terrainClearance);
+			}
+			if (!Double.isNaN(scan.groundBelowY())) {
+				terrainFloor = Math.max(terrainFloor, scan.groundBelowY() + cfg.terrainClearance);
+			}
+			if (terrainFloor > sessionCruiseY) {
+				sessionCruiseY = terrainFloor;
+				altitudeHoldTicks = 100; // hold height for 5s across adjacent peaks/canopy gaps
+			} else if (sessionCruiseY > terrainFloor + 0.5) {
+				if (altitudeHoldTicks > 0) {
+					altitudeHoldTicks--;
+				} else {
+					sessionCruiseY = Math.max(terrainFloor, sessionCruiseY - 0.15);
+				}
+			}
 		}
 
 		activeCommand = cmd;

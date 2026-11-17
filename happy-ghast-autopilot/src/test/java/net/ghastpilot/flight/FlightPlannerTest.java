@@ -36,11 +36,11 @@ class FlightPlannerTest {
 				arrived = true;
 				break;
 			}
-			double[] step = toWorldVelocity(cmd, 0.20); // ~4.0 blocks/s
+			yaw = FlightPlanner.wrapDegrees(yaw + FlightPlanner.angleDelta(yaw, cmd.yaw()) * 0.08f);
+			double[] step = toWorldVelocity(cmd, yaw, 0.20); // ~4.0 blocks/s with vanilla 0.08f yaw damping
 			x += step[0];
 			y += step[1];
 			z += step[2];
-			yaw = cmd.yaw();
 			pitch = cmd.pitch();
 		}
 
@@ -71,11 +71,11 @@ class FlightPlannerTest {
 				arrived = true;
 				break;
 			}
-			double[] step = toWorldVelocity(cmd, 0.20);
+			yaw = FlightPlanner.wrapDegrees(yaw + FlightPlanner.angleDelta(yaw, cmd.yaw()) * 0.08f);
+			double[] step = toWorldVelocity(cmd, yaw, 0.20);
 			x += step[0];
 			y += step[1];
 			z += step[2];
-			yaw = cmd.yaw();
 			pitch = cmd.pitch();
 		}
 
@@ -143,6 +143,58 @@ class FlightPlannerTest {
 	}
 
 	@Test
+	void simulatedFlightClimbsCleanlyOverMountainRange() {
+		FlightTarget target = FlightTarget.ofXZ(200, 0, "minecraft:overworld");
+		FlightSettings settings = FlightSettings.defaults(); // terrainClearance = 12
+
+		double x = 0.0, y = 78.0, z = 0.0;
+		float yaw = -90.0f, pitch = 0.0f;
+		boolean arrived = false;
+
+		for (int tick = 0; tick < 4000; tick++) {
+			double groundHere = mountainHeightAt(x);
+			assertTrue(y >= groundHere, "Ghast must never clip into mountain terrain at x=" + x);
+
+			double maxAhead = groundHere;
+			for (double d : new double[]{4, 9, 15, 22, 28}) {
+				maxAhead = Math.max(maxAhead, mountainHeightAt(x + d));
+			}
+			boolean immediateWall = mountainHeightAt(x + 4.5) >= y;
+			boolean nearWall = immediateWall || mountainHeightAt(x + 10.0) >= y;
+
+			EnvironmentScan scan = new EnvironmentScan(
+					true, immediateWall, nearWall, true, y > groundHere + 2.0,
+					false, false, maxAhead, groundHere, null
+			);
+			SteeringCommand cmd = FlightPlanner.plan(
+					x, y, z, yaw, pitch, target, 78.0, settings, scan, 0, 1
+			);
+			if (cmd.arrived()) {
+				arrived = true;
+				break;
+			}
+			yaw = FlightPlanner.wrapDegrees(yaw + FlightPlanner.angleDelta(yaw, cmd.yaw()) * 0.08f);
+			double[] step = toWorldVelocity(cmd, yaw, 0.20);
+			x += step[0];
+			y += step[1];
+			z += step[2];
+			pitch = cmd.pitch();
+		}
+
+		assertTrue(arrived, "Should cross the mountain range and reach the destination");
+		assertTrue(target.horizontalDistanceTo(x, z) <= settings.arrivalRadius());
+	}
+
+	/** Steep mountain peak centered at x = 100 rising from Y = 64 up to Y = 148. */
+	private static double mountainHeightAt(double x) {
+		double dist = Math.abs(x - 100.0);
+		if (dist >= 42.0) {
+			return 64.0;
+		}
+		return 64.0 + (42.0 - dist) * 2.0;
+	}
+
+	@Test
 	void coordinateParserHandlesCommonAndXaeroFormats() {
 		Optional<FlightTarget> simpleXZ = CoordinateParser.parse("250 -1400", "minecraft:overworld");
 		assertTrue(simpleXZ.isPresent());
@@ -201,10 +253,10 @@ class FlightPlannerTest {
 		assertNull(MapLineClipper.clip(-500, -500, -100, -200, 0, 0, 1920, 1080));
 	}
 
-	/** Converts local (strafe, up, forward) into world delta (dx, dy, dz) using Minecraft entity yaw. */
-	private static double[] toWorldVelocity(SteeringCommand cmd, double blocksPerTick) {
+	/** Converts local (strafe, up, forward) into world delta (dx, dy, dz) using actual ghast entity yaw. */
+	private static double[] toWorldVelocity(SteeringCommand cmd, float actualGhastYaw, double blocksPerTick) {
 		double[] local = cmd.computeLocalInputComponents();
-		double rad = Math.toRadians(cmd.yaw());
+		double rad = Math.toRadians(actualGhastYaw);
 		double sin = Math.sin(rad);
 		double cos = Math.cos(rad);
 		double dx = (local[0] * cos - local[2] * sin) * blocksPerTick;
