@@ -110,36 +110,46 @@ jobs:
 
           mc_jar=$(find ~/.gradle/caches -type f -name "*.jar" ! -name "*-sources.jar" -exec sh -c 'jar tf "$1" 2>/dev/null | grep -q "^net/minecraft/world/entity/animal/happyghast/HappyGhast.class$"' _ {} \; -print -quit)
           {
-            echo "MC jar: $mc_jar"
             if [ -n "$mc_jar" ]; then
-              echo "--- HappyGhast methods ---"
-              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast
-              echo "--- HappyGhast tickRidden & getRiddenInput & getControllingPassenger bytecode ---"
-              javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | awk '/(tickRidden|getRiddenInput|getControllingPassenger|createPlayerRotation|getRiddenSpeed)\(/{flag=1; c=0} flag{print; c++; if(c>45 || /^$/){flag=0}}'
+              echo "--- HappyGhast ridden methods ---"
+              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast | grep -iE "ridden|travel|rot|control|passeng|harness|armor|still|speed|fly"
+              echo "--- HappyGhast bytecode for travel / tickRidden / getRiddenInput / getControllingPassenger / createPlayerRotation ---"
+              javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | python3 -c '
+import sys, re
+txt = sys.stdin.read()
+for block in txt.split("\n\n"):
+    first = block.splitlines()[0] if block.splitlines() else ""
+    if any(k in first for k in ("travel(", "tickRidden(", "getRiddenInput(", "getControllingPassenger(", "createPlayerRotation(", "getRiddenSpeed(", "createAttributes(")):
+        print(block + "\n")
+'
             fi
           } > report-ghast.txt 2>&1
 
           xaero_jar=$(find ~/.gradle/caches -type f \( -name "*NcUtCpym*.jar" -o -name "*xaeroworldmap*.jar" \) ! -name "*-sources.jar" | head -n 1)
           {
-            echo "Xaero jar: $xaero_jar"
             if [ -n "$xaero_jar" ]; then
-              echo "--- GuiMap relevant fields & methods ---"
-              javap -cp "$xaero_jar" -p xaero.map.gui.GuiMap | grep -E "rightClick|mouseBlock|camera|scale|screenScale|mapProcessor|getRightClickOptions|renderPreDropdown|getMapProcessor|destScale|Dimension"
-              echo "--- WaypointReader ---"
-              javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader
-              echo "--- Waypoint ---"
+              echo "--- WaypointReader methods ---"
+              javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader | grep -iE "RightClick|RenderX|RenderZ"
+              echo "--- Waypoint full ---"
               javap -cp "$xaero_jar" -p xaero.map.mods.gui.Waypoint
-              echo "--- MapWorld ---"
-              javap -cp "$xaero_jar" -p xaero.map.world.MapWorld | grep -E "Dimension|dimension|Scale|Div"
-              echo "--- RightClickOption ---"
-              javap -cp "$xaero_jar" -p xaero.map.gui.dropdown.rightclick.RightClickOption
+              echo "--- RightClickOption full ---"
+              javap -cp "$xaero_jar" -c -p xaero.map.gui.dropdown.rightclick.RightClickOption
+              echo "--- GuiRightClickMenu ---"
+              javap -cp "$xaero_jar" -p xaero.map.gui.dropdown.rightclick.GuiRightClickMenu
             fi
           } > report-xaero.txt 2>&1
 
           {
             if [ -n "$xaero_jar" ]; then
-              echo "--- GuiMap getRightClickOptions & mouseClicked rightClick assignment ---"
-              javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | grep -B 4 -A 6 "rightClick" | head -n 90
+              echo "--- GuiMap getRightClickOptions bytecode ---"
+              javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | python3 -c '
+import sys
+txt = sys.stdin.read()
+for block in txt.split("\n\n"):
+    first = block.splitlines()[0] if block.splitlines() else ""
+    if "getRightClickOptions(" in first or "teleport(" in first:
+        print(block[:2400] + "\n")
+'
             fi
           } > report-xaero2.txt 2>&1
 
