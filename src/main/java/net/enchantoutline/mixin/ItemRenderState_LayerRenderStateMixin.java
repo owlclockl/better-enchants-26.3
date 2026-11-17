@@ -8,7 +8,7 @@ import net.enchantoutline.mixin_accessors.ItemRenderState_LayerRenderStateAccess
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.special.SpecialModelRenderer;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.resources.model.geometry.ItemQuads;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.InteractionResult;
@@ -17,7 +17,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 
-import java.util.List;
 
 @Mixin(ItemStackRenderState.LayerRenderState.class)
 public class ItemRenderState_LayerRenderStateMixin implements ItemRenderState_LayerRenderStateAccessor {
@@ -32,15 +31,15 @@ public class ItemRenderState_LayerRenderStateMixin implements ItemRenderState_La
         }
     }
 
-    @WrapOperation(method = "submit", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/SubmitNodeCollector;submitItem(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/world/item/ItemDisplayContext;III[ILjava/util/List;Lnet/minecraft/client/renderer/item/ItemStackRenderState$FoilType;)V"))
-    void enchantOutline$renderItemNormal(SubmitNodeCollector instance, PoseStack matrixStack, ItemDisplayContext itemDisplayContext, int light, int overlay, int outlineColors, int[] tintLayers, List<BakedQuad> quads, ItemStackRenderState.FoilType glintType, Operation<Void> original){
+    @WrapOperation(method = "submit", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/SubmitNodeCollector;submitItem(Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/world/item/ItemDisplayContext;III[ILnet/minecraft/client/resources/model/geometry/ItemQuads;Lnet/minecraft/client/renderer/item/ItemStackRenderState$FoilType;)V"))
+    void enchantOutline$renderItemNormal(SubmitNodeCollector instance, PoseStack matrixStack, ItemDisplayContext itemDisplayContext, int light, int overlay, int outlineColors, int[] tintLayers, ItemQuads quads, ItemStackRenderState.FoilType glintType, Operation<Void> original){
         ItemStackRenderState.LayerRenderState castLayerRenderState = (ItemStackRenderState.LayerRenderState)(Object)(this);
-        InteractionResult result = RenderQuads.Normal.Callback.EVENT.invoker().renderItem(castLayerRenderState, instance, matrixStack, itemDisplayContext, light, overlay, outlineColors, tintLayers, quads, null, glintType);
+        InteractionResult result = RenderQuads.Normal.Callback.EVENT.invoker().renderItem(castLayerRenderState, instance, matrixStack, itemDisplayContext, light, overlay, outlineColors, tintLayers, quads.all(), null, glintType);
 
         if(result != InteractionResult.FAIL){
             original.call(instance, matrixStack, itemDisplayContext, light, overlay, outlineColors, tintLayers, quads, glintType);
 
-            RenderQuads.Normal.Post.EVENT.invoker().renderItem(castLayerRenderState, instance, matrixStack, itemDisplayContext, light, overlay, outlineColors, tintLayers, quads, null, glintType);
+            RenderQuads.Normal.Post.EVENT.invoker().renderItem(castLayerRenderState, instance, matrixStack, itemDisplayContext, light, overlay, outlineColors, tintLayers, quads.all(), null, glintType);
         }
     }
 

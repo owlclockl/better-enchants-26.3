@@ -1,12 +1,12 @@
 package net.enchantoutline.shader;
 
-import com.mojang.blaze3d.GpuFormat;
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.pipeline.ColorTargetState;
-import com.mojang.blaze3d.pipeline.DepthStencilState;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.platform.CompareOp;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.renderpearl.api.GpuFormat;
+import com.mojang.renderpearl.api.pipeline.ColorTargetState;
+import com.mojang.renderpearl.api.pipeline.CompareOp;
+import com.mojang.renderpearl.api.pipeline.DepthStencilState;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 
 import java.util.Optional;
 import net.enchantoutline.EnchantmentGlintOutline;
@@ -17,20 +17,23 @@ import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.TextureTransform;
 import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.data.AtlasIds;
 import net.minecraft.resources.Identifier;
 
 import java.util.Map;
-import java.util.function.Supplier;
 
 public class Shaders {
     private static final String MOD_ID = EnchantmentGlintOutline.MOD_ID;
 
-    // 26.2: samplers and the vertex format moved onto bind group layouts / explicit vertex bindings.
-    // MATRICES_FOG_SNIPPET already carries GLOBALS + MATRICES_PROJECTION + FOG, which is exactly what
-    // outline.vsh imports (globals/dynamictransforms/projection/fog). Sampler0 + Sampler2 come from
+    // 26.3: the blaze3d render stack was split out into com.mojang.renderpearl, and the pipeline
+    // snippets in RenderPipelines are private. MATRICES_FOG_SNIPPET there is exactly
+    // GLOBALS + PROJECTION + DYNAMIC_TRANSFORMS + FOG, which is what outline.vsh imports
+    // (globals/dynamictransforms/projection/fog). Sampler0 + Sampler2 come from
     // SAMPLER0_SAMPLER2, matching the two `uniform sampler2D` declarations in the shader.
-    public static final RenderPipeline.Snippet OUTLINE_SNIPPET = RenderPipeline.builder(RenderPipelines.MATRICES_FOG_SNIPPET)
+    public static final RenderPipeline.Snippet OUTLINE_SNIPPET = RenderPipeline.builder()
+            .withBindGroupLayout(BindGroupLayouts.GLOBALS)
+            .withBindGroupLayout(BindGroupLayouts.PROJECTION)
+            .withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
+            .withBindGroupLayout(BindGroupLayouts.FOG)
             .withVertexShader(Identifier.fromNamespaceAndPath(MOD_ID, "core/outline"))
             .withFragmentShader(Identifier.fromNamespaceAndPath(MOD_ID, "core/outline"))
             .withBindGroupLayout(BindGroupLayouts.SAMPLER0_SAMPLER2)
@@ -38,10 +41,8 @@ public class Shaders {
             .withPrimitiveTopology(PrimitiveTopology.QUADS)
             .buildSnippet();
 
-    // 26.2 switched the depth buffer to reversed-Z: the far plane clears to 0.0 instead of 1.0 and
-    // every vanilla pipeline flipped LESS_THAN_OR_EQUAL -> GREATER_THAN_OR_EQUAL. Keeping the old
-    // comparison here inverts the depth test, which makes the outline show through whatever should
-    // occlude it and lets the depth-write pass corrupt the depth around the item.
+    // The depth buffer is reversed-Z: the far plane clears to 0.0 instead of 1.0 and every vanilla
+    // pipeline uses GREATER_THAN_OR_EQUAL. Keeping the old comparison here inverts the depth test.
     // depth-only: writes depth, no color. Used to lay down the outline stencil behind the item.
     private static final ColorTargetState NO_COLOR = new ColorTargetState(Optional.empty(), GpuFormat.RGBA8_UNORM, ColorTargetState.WRITE_NONE);
     private static final DepthStencilState DEPTH_WRITE = new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, true);
@@ -51,7 +52,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_DEPTH_CULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_depth_cull"))
                     .withCull(true)
                     .withColorTargetState(NO_COLOR)
                     .withDepthStencilState(DEPTH_WRITE)
@@ -61,7 +62,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_COLOR_CULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_color_cull"))
                     .withCull(true)
                     .withColorTargetState(WRITE_COLOR)
                     .withDepthStencilState(NO_DEPTH_WRITE)
@@ -71,7 +72,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_DEPTH_NOCULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_depth_nocull"))
                     .withCull(false)
                     .withColorTargetState(NO_COLOR)
                     .withDepthStencilState(DEPTH_WRITE)
@@ -81,7 +82,7 @@ public class Shaders {
 
     public static final RenderPipeline CUTOUT_PIPELINE_COLOR_NOCULL = RenderPipelines.register(
             RenderPipeline.builder(OUTLINE_SNIPPET)
-                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout"))
+                    .withLocation(Identifier.fromNamespaceAndPath(MOD_ID, "pipeline/cutout_color_nocull"))
                     .withCull(false)
                     .withColorTargetState(WRITE_COLOR)
                     .withDepthStencilState(NO_DEPTH_WRITE)
@@ -116,10 +117,29 @@ public class Shaders {
                     .createRenderSetup()
     );
 
+    // 26.3 turned the glint render types into per-texture functions. `RenderPipelines.GLINT` itself
+    // is unchanged (core/glint shader, Sampler0 = the glint texture), so the outline's own glint
+    // passes can keep mirroring the vanilla 26.2 "glint" / "entity_glint" / "armor_entity_glint"
+    // setups - they are simply spelled out here because the singletons are gone.
+    public static final RenderType VANILLA_GLINT_ITEM = RenderType.create(
+            "enchout_vanilla_glint_item",
+            RenderSetup.builder(RenderPipelines.GLINT)
+                    .withTexture("Sampler0", ItemFeatureRenderer.ENCHANTED_GLINT_ITEM)
+                    .setTextureTransform(TextureTransform.GLINT_TEXTURING)
+                    .createRenderSetup()
+    );
+
+    public static final RenderType VANILLA_GLINT_ENTITY = RenderType.create(
+            "enchout_vanilla_glint_entity",
+            RenderSetup.builder(RenderPipelines.GLINT)
+                    .withTexture("Sampler0", ItemFeatureRenderer.ENCHANTED_GLINT_ITEM)
+                    .setTextureTransform(TextureTransform.ENTITY_GLINT_TEXTURING)
+                    .createRenderSetup()
+    );
+
     public static final RenderType ARMOR_ENTITY_GLINT_FIX = RenderType.create(
             "enchout_glint_armor",
             RenderSetup.builder(RenderPipelines.GLINT)
-                    .useLightmap()
                     .withTexture("Sampler0", ItemFeatureRenderer.ENCHANTED_GLINT_ARMOR)
                     .setTextureTransform(TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
                     .affectsCrumbling()
@@ -142,22 +162,21 @@ public class Shaders {
                 .useLightmap()
                 .affectsCrumbling();
 
-        for(var entry : specMap.entrySet()){
+        for(var entry : specMap.entrySet()) {
             builder = builder.withTexture("Sampler0", entry.getValue());
         }
 
         return RenderType.create("enchout_glint_model", builder.createRenderSetup());
     }
 
-    // 26.2: draw ordering no longer lives on the RenderType (there is no shared buffer map to splice
-    // into any more). It is expressed purely through SubmitNodeCollector.order(int) at submit time,
-    // so the old "draw before/after custom" flags are gone.
+    // Draw ordering does not live on the RenderType - it is expressed through
+    // SubmitNodeCollector.order(int) at submit time, so no "draw before/after" flags live here.
     public static RenderType createColorRenderLayerCull(Map<String, Identifier> specMap) {
         RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_COLOR_CULL)
                 .useLightmap()
                 .affectsCrumbling();
 
-        for(var entry : specMap.entrySet()){
+        for(var entry : specMap.entrySet()) {
             builder = builder.withTexture("Sampler0", entry.getValue());
         }
 
@@ -169,7 +188,7 @@ public class Shaders {
                 .useLightmap()
                 .affectsCrumbling();
 
-        for(var entry : specMap.entrySet()){
+        for(var entry : specMap.entrySet()) {
             builder = builder.withTexture("Sampler0", entry.getValue());
         }
 
@@ -177,25 +196,28 @@ public class Shaders {
     }
 
     public static RenderType createZFixRenderLayerCull(Map<String, Identifier> specMap) {//TextureSpec
-        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_CULL);
+        //26.3 binds textures by name into a fixed bind-group layout, so Sampler2 has to be present even
+        //for the depth-only pass (the outline shader samples the lightmap in the vertex stage).
+        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_CULL)
+                .useLightmap()
+                .affectsCrumbling();
 
-        for(var entry : specMap.entrySet()){
-            builder = builder.withTexture("Sampler0", entry.getValue()/*, entry.getValue().sampler()*/);
+        for(var entry : specMap.entrySet()) {
+            builder = builder.withTexture("Sampler0", entry.getValue());
         }
 
         return RenderType.create("enchout_zfix_model", builder.createRenderSetup());
     }
 
     public static RenderType createZFixRenderLayerNoCull(Map<String, Identifier> specMap) {//TextureSpec
-        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_NOCULL);
+        RenderSetup.RenderSetupBuilder builder = RenderSetup.builder(CUTOUT_PIPELINE_DEPTH_NOCULL)
+                .useLightmap()
+                .affectsCrumbling();
 
-        for(var entry : specMap.entrySet()){
-            builder = builder.withTexture("Sampler0", entry.getValue()/*, entry.getValue().sampler()*/);
+        for(var entry : specMap.entrySet()) {
+            builder = builder.withTexture("Sampler0", entry.getValue());
         }
 
         return RenderType.create("enchout_zfix_model", builder.createRenderSetup());
     }
-
-    /*public static record TextureSpec(Identifier location, Supplier<GpuSampler> sampler) {
-    }*/
 }

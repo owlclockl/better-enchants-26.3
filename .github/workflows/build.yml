@@ -1,30 +1,135 @@
-# Automatically build the project and run any configured tests for every push
-# and submitted pull request. This can help catch issues that only occur on
-# certain platforms or Java versions, and provides a first line of defence
-# against bad commits.
-
+# Build the Minecraft 26.3 Fabric mod with the Java version the game requires.
 name: build
-on: [pull_request, push]
+
+on: [pull_request, push, workflow_dispatch]
 
 jobs:
   build:
+    permissions:
+      contents: read
     runs-on: ubuntu-24.04
     steps:
-      - name: checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
-      - name: validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
-      - name: setup jdk
+
+      - name: Validate Gradle wrapper
+        uses: gradle/wrapper-validation-action@v1
+
+      - name: Set up Java 25
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'microsoft'
-      - name: make gradle wrapper executable
+          distribution: temurin
+          java-version: '25'
+
+      - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
-      - name: build
-        run: ./gradlew build
-      - name: capture build artifacts
+
+      - name: Build mod
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon build > build-output.log 2>&1
+          build_status=$?
+          cat build-output.log
+          if [ "$build_status" -ne 0 ]; then
+            python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          text = Path("build-output.log").read_text(errors="replace")
+          lines = text.splitlines()
+
+          def emit(title, body):
+              body = body[-3500:]
+              escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{escaped}")
+
+          # 1) one-line summary of every compiler error
+          errors = [l.strip() for l in lines if "error:" in l or l.strip().startswith("* What went wrong") or "FAILURE:" in l]
+          emit("Gradle errors summary", "\n".join(errors[:120]))
+
+          # 2) context around each error, packed into a few annotations
+          chunks, current = [], []
+          for i, line in enumerate(lines):
+              if "error:" in line:
+                  block = "\n".join(lines[i:i + 6])
+                  if sum(len(c) for c in current) + len(block) > 3000:
+                      chunks.append("\n\n".join(current))
+                      current = []
+                  current.append(block)
+          if current:
+              chunks.append("\n\n".join(current))
+          for n, chunk in enumerate(chunks[:8]):
+              emit(f"Gradle error context {n + 1}", chunk)
+          PY
+            exit "$build_status"
+          fi
+
+      - name: Report built jars
+        if: success()
+        shell: bash
+        run: |
+          set +e
+          ls -l build/libs
+          main_jar=$(find build/libs -maxdepth 1 -type f -name 'enchantment-glint-outline-*.jar' ! -name '*-sources.jar' -print -quit)
+          {
+            echo "jar: $main_jar"
+            jar tf "$main_jar" 2>/dev/null | head -n 40 || unzip -l "$main_jar" | head -n 40
+            echo "--- fabric.mod.json ---"
+            unzip -p "$main_jar" fabric.mod.json 2>/dev/null | head -n 24 || true
+            echo "--- mixins / refmap ---"
+            jar tf "$main_jar" 2>/dev/null | grep -Ei 'refmap|mixins.json|accesswidener' || true
+          } > jar-report.txt 2>&1
+          python3 -c "import pathlib; t=pathlib.Path('jar-report.txt').read_text(errors='replace')[-3500:]; print('::notice title=Built jar::'+t.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A'))"
+          cat jar-report.txt
+          exit 0
+
+      - name: Upload build artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Artifacts
-          path: build/libs/
+          name: enchantment-glint-outline-26.3
+          path: build/libs/*.jar
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release metadata
+        uses: actions/checkout@v4
+
+      - name: Download built mod JARs
+        uses: actions/download-artifact@v4
+        with:
+          name: enchantment-glint-outline-26.3
+          path: build/libs
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mod_version=$(awk -F= '$1 == "mod_version" {print $2}' gradle.properties)
+          minecraft_version=$(awk -F= '$1 == "minecraft_version" {print $2}' gradle.properties)
+          release_tag="${mod_version}+${minecraft_version}"
+          artifact=$(find build/libs -maxdepth 1 -type f -name 'enchantment-glint-outline-*.jar' ! -name '*-sources.jar' -print -quit)
+          test -n "$artifact"
+          echo "Release asset: $artifact ($(stat -c%s "$artifact") bytes)"
+          sha256sum "$artifact"
+          set +e
+          gh release create "$release_tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Enchantment Glint Outline ${mod_version} for Minecraft ${minecraft_version}" --notes "Enchantment Glint Outline ported to Minecraft ${minecraft_version} on Fabric.\n\n* Minecraft ${minecraft_version}, Fabric Loader 0.19.5, Fabric API 0.166.2+26.3\n* Rendering updated for the 26.3 render stack (com.mojang.renderpearl, UvMapping-based model submits, ItemQuads item submits, per-texture glint render types)\n* Java 25\n\nRequires Fabric API. Mod Menu + YACL optional (config screen)." > release-output.log 2>&1
+          release_status=$?
+          cat release-output.log
+          if [ "$release_status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          text = Path("release-output.log").read_text(errors="replace")[-4000:]
+          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=GitHub release output::{escaped}")
+          PY
+            exit "$release_status"
+          fi
