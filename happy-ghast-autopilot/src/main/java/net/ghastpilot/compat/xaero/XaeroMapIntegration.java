@@ -53,6 +53,7 @@ public final class XaeroMapIntegration {
 	private static final Field FIELD_CAMERA_Z = findField("cameraZ");
 	private static final Field FIELD_SCALE = findField("scale");
 	private static final Field FIELD_SCREEN_SCALE = findField("screenScale");
+	private static final Field FIELD_MAP_PROCESSOR = findField("mapProcessor");
 
 	private XaeroMapIntegration() {
 	}
@@ -327,8 +328,7 @@ public final class XaeroMapIntegration {
 
 	private static String resolveMapDimension(GuiMap guiMap) {
 		try {
-			MapProcessor processor = guiMap.getMapProcessor();
-			if (processor != null) {
+			if (FIELD_MAP_PROCESSOR != null && FIELD_MAP_PROCESSOR.get(guiMap) instanceof MapProcessor processor) {
 				MapWorld mapWorld = processor.getMapWorld();
 				if (mapWorld != null) {
 					ResourceKey<Level> dimKey = mapWorld.getCurrentDimensionId();
