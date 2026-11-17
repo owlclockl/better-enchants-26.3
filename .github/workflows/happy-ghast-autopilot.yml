@@ -111,17 +111,18 @@ jobs:
           mc_jar=$(find ~/.gradle/caches -type f -name "*.jar" ! -name "*-sources.jar" -exec sh -c 'jar tf "$1" 2>/dev/null | grep -q "^net/minecraft/world/entity/animal/happyghast/HappyGhast.class$"' _ {} \; -print -quit)
           {
             if [ -n "$mc_jar" ]; then
-              echo "--- HappyGhast ridden methods ---"
-              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast | grep -iE "ridden|travel|rot|control|passeng|harness|armor|still|speed|fly"
-              echo "--- HappyGhast bytecode for travel / tickRidden / getRiddenInput / getControllingPassenger / createPlayerRotation ---"
               javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast > raw-ghast.txt
               python3 - <<'PY'
           from pathlib import Path
           txt = Path("raw-ghast.txt").read_text(errors="replace")
-          for block in txt.split("\n\n"):
-              first = block.splitlines()[0] if block.splitlines() else ""
-              if any(k in first for k in ("travel(", "tickRidden(", "getRiddenInput(", "getControllingPassenger(", "createPlayerRotation(", "getRiddenSpeed(", "createAttributes(")):
-                  print(block + "\n")
+          lines = txt.splitlines()
+          want = ("getRiddenInput(", "getRiddenRotation(", "tickRidden(", "public void travel(")
+          printing = False
+          for line in lines:
+              if line.startswith("  ") and not line.startswith("    "):
+                  printing = any(w in line for w in want)
+              if printing:
+                  print(line)
           PY
             fi
           } > report-ghast.txt 2>&1
@@ -129,28 +130,41 @@ jobs:
           xaero_jar=$(find ~/.gradle/caches -type f \( -name "*NcUtCpym*.jar" -o -name "*xaeroworldmap*.jar" \) ! -name "*-sources.jar" | head -n 1)
           {
             if [ -n "$xaero_jar" ]; then
-              echo "--- WaypointReader methods ---"
-              javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader | grep -iE "RightClick|RenderX|RenderZ"
-              echo "--- Waypoint full ---"
-              javap -cp "$xaero_jar" -p xaero.map.mods.gui.Waypoint
-              echo "--- RightClickOption full ---"
-              javap -cp "$xaero_jar" -c -p xaero.map.gui.dropdown.rightclick.RightClickOption
-              echo "--- GuiRightClickMenu ---"
-              javap -cp "$xaero_jar" -p xaero.map.gui.dropdown.rightclick.GuiRightClickMenu
+              javap -cp "$xaero_jar" -c -p xaero.map.mods.gui.Waypoint > raw-wp.txt
+              python3 - <<'PY'
+          from pathlib import Path
+          for name, path, targets in [
+              ("Waypoint", "raw-wp.txt", ("getX(", "getY(", "getZ(", "getRenderX(", "getRenderZ(", "isyIncluded(")),
+          ]:
+              lines = Path(path).read_text(errors="replace").splitlines()
+              p = False
+              for l in lines:
+                  if l.startswith("  ") and not l.startswith("    "):
+                      p = any(t in l for t in targets)
+                  if p:
+                      print(l)
+          PY
+              echo "--- RightClickOption methods ---"
+              javap -cp "$xaero_jar" -p xaero.map.gui.dropdown.rightclick.RightClickOption
+              echo "--- GuiRightClickMenu methods ---"
+              javap -cp "$xaero_jar" -c -p xaero.map.gui.dropdown.rightclick.GuiRightClickMenu | head -n 65
             fi
           } > report-xaero.txt 2>&1
 
           {
             if [ -n "$xaero_jar" ]; then
-              echo "--- GuiMap getRightClickOptions bytecode ---"
               javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap > raw-guimap.txt
               python3 - <<'PY'
           from pathlib import Path
-          txt = Path("raw-guimap.txt").read_text(errors="replace")
-          for block in txt.split("\n\n"):
-              first = block.splitlines()[0] if block.splitlines() else ""
-              if "getRightClickOptions(" in first or "teleport(" in first:
-                  print(block[:2400] + "\n")
+          lines = Path("raw-guimap.txt").read_text(errors="replace").splitlines()
+          p = False
+          out = []
+          for l in lines:
+              if l.startswith("  ") and not l.startswith("    "):
+                  p = "getRightClickOptions(" in l
+              if p and ("rightClick" in l or "String " in l or "32767" in l or "ldc" in l or "invokevirtual" in l):
+                  out.append(l)
+          print("\n".join(out[:80]))
           PY
             fi
           } > report-xaero2.txt 2>&1
