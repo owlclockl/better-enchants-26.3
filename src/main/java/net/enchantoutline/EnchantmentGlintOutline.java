@@ -188,7 +188,7 @@ public class EnchantmentGlintOutline implements ModInitializer {
 			return InteractionResult.PASS;
 		});
 
-		EquipmentRendererQueueEnchantedCallback.EVENT.register((( queueHolder, renderedStack, queue, texture, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
+		EquipmentRendererQueueEnchantedCallback.EVENT.register((( queueHolder, renderedStack, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
 			//I can build this using the current renderLayer the model class is surprisingly simple. It just is made of a model part which I already am able to render an outline for. just build a new model every frame and we should be set
 			//26.3: armour glint is part of the layer render type now, so only the enchanted (glint) layer of a
 			//foiled piece of armour passes this check - exactly the layers that used to be glint submits.
@@ -201,8 +201,9 @@ public class EnchantmentGlintOutline implements ModInitializer {
 					model.setupAnim(s);
 
 					float scale = config.getScaleFactorFromOutlineSize(config.getOutlineSizeOverrideOrDefault(override, true));
-					//should create it straight from the identifier but it's just not working, this does. hence the garbage
-					RenderType garbageHackPatchLayer = RenderTypes.armorCutoutNoCull(texture);
+					//26.3: the submitted render type already carries the layer texture as Sampler0, so it can be
+					//used as the texture source directly instead of rebuilding armorCutoutNoCull(identifier).
+					RenderType garbageHackPatchLayer = renderLayer;
 					if(config.getRenderSolidOverrideOrDefault(override, true)){
 						int tint = config.getOutlineColorAsInt(config.getOutlineColorOverrideOrDefault(override));
 

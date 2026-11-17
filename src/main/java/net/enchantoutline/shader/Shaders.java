@@ -140,7 +140,6 @@ public class Shaders {
     public static final RenderType ARMOR_ENTITY_GLINT_FIX = RenderType.create(
             "enchout_glint_armor",
             RenderSetup.builder(RenderPipelines.GLINT)
-                    .useLightmap()
                     .withTexture("Sampler0", ItemFeatureRenderer.ENCHANTED_GLINT_ARMOR)
                     .setTextureTransform(TextureTransform.ARMOR_ENTITY_GLINT_TEXTURING)
                     .affectsCrumbling()

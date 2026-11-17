@@ -13,7 +13,6 @@ import net.minecraft.client.renderer.texture.UvMapping;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -27,8 +26,8 @@ public class EquipmentRendererMixin {
      * decides from the render type whether the layer is enchanted.
      */
     @WrapOperation(method = "renderLayers(Lnet/minecraft/client/resources/model/EquipmentClientInfo$LayerType;Lnet/minecraft/resources/ResourceKey;Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lnet/minecraft/world/item/ItemStack;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;ILnet/minecraft/resources/Identifier;II)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OrderedSubmitNodeCollector;submitModel(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;IIILnet/minecraft/client/renderer/texture/UvMapping;I)V"))
-    <S> void enchantOutline$renderArmorEnchanted(OrderedSubmitNodeCollector instance, Model<? super S> model, S s, PoseStack poseStack, RenderType renderType, int light, int overlay, int tintColor, @Nullable UvMapping uvMapping, int outlineColor, Operation<Void> original, @Local(name = "layerTexture") Identifier layerTexture, @Local(argsOnly = true) SubmitNodeCollector submitNodeCollector, @Local(argsOnly = true) ItemStack itemStack){
-        InteractionResult result = EquipmentRendererQueueEnchantedCallback.EVENT.invoker().onQueue(submitNodeCollector, itemStack, instance, layerTexture, model, s, poseStack, renderType, light, overlay, tintColor, uvMapping, outlineColor);
+    <S> void enchantOutline$renderArmorEnchanted(OrderedSubmitNodeCollector instance, Model<? super S> model, S s, PoseStack poseStack, RenderType renderType, int light, int overlay, int tintColor, @Nullable UvMapping uvMapping, int outlineColor, Operation<Void> original, @Local(argsOnly = true) SubmitNodeCollector submitNodeCollector, @Local(argsOnly = true) ItemStack itemStack){
+        InteractionResult result = EquipmentRendererQueueEnchantedCallback.EVENT.invoker().onQueue(submitNodeCollector, itemStack, instance, model, s, poseStack, renderType, light, overlay, tintColor, uvMapping, outlineColor);
 
         if(result != InteractionResult.FAIL){
             original.call(instance, model, s, poseStack, renderType, light, overlay, tintColor, uvMapping, outlineColor);

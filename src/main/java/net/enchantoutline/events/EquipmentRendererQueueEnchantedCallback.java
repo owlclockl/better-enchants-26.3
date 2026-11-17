@@ -10,15 +10,14 @@ import net.minecraft.client.renderer.texture.UvMapping;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.Nullable;
 
 //purposefully not going to assign a type since I need generics
 public interface EquipmentRendererQueueEnchantedCallback<S> {
     Event<EquipmentRendererQueueEnchantedCallback> EVENT = EventFactory.createArrayBacked(EquipmentRendererQueueEnchantedCallback.class,
-            (listeners) -> ( queueHolder, renderedStack, queue, texture, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
+            (listeners) -> ( queueHolder, renderedStack, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
                 for (EquipmentRendererQueueEnchantedCallback listener : listeners) {
-                    InteractionResult result = listener.onQueue(queueHolder, renderedStack, queue, texture, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor);
+                    InteractionResult result = listener.onQueue(queueHolder, renderedStack, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor);
 
                     if (result != InteractionResult.PASS) {
                         return result;
@@ -28,5 +27,5 @@ public interface EquipmentRendererQueueEnchantedCallback<S> {
                 return InteractionResult.PASS;
             });
 
-    InteractionResult onQueue(SubmitNodeCollector queueHolder, ItemStack renderedStack, OrderedSubmitNodeCollector queue, Identifier texture, Model<? super S> model, S s, PoseStack matrixStack, RenderType renderLayer, int light, int overlay, int tintColor, @Nullable UvMapping uvMapping, int outlineColor);
+    InteractionResult onQueue(SubmitNodeCollector queueHolder, ItemStack renderedStack, OrderedSubmitNodeCollector queue, Model<? super S> model, S s, PoseStack matrixStack, RenderType renderLayer, int light, int overlay, int tintColor, @Nullable UvMapping uvMapping, int outlineColor);
 }

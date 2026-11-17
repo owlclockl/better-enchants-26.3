@@ -65,6 +65,27 @@ jobs:
             exit "$build_status"
           fi
 
+      - name: Report built jars
+        if: success()
+        shell: bash
+        run: |
+          for jar in build/libs/*.jar; do
+            echo "## $jar ($(stat -c%s "$jar") bytes)"
+          done
+          main_jar=$(find build/libs -maxdepth 1 -type f -name 'enchantment-glint-outline-*.jar' ! -name '*-sources.jar' -print -quit)
+          {
+            echo "jar: $main_jar"
+            unzip -l "$main_jar" | tail -n +4 | head -n 40
+            echo "--- fabric.mod.json version ---"
+            unzip -p "$main_jar" fabric.mod.json | head -n 8
+          } > jar-report.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("jar-report.txt").read_text(errors="replace")[-4000:]
+          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::notice title=Built jar::{escaped}")
+          PY
+
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
@@ -102,7 +123,7 @@ jobs:
           echo "Release asset: $artifact ($(stat -c%s "$artifact") bytes)"
           sha256sum "$artifact"
           set +e
-          gh release create "$release_tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Enchantment Glint Outline ${mod_version} for Minecraft ${minecraft_version}" --notes "Ported to Minecraft ${minecraft_version} (Fabric loader 0.19.5, Fabric API 0.166.2+26.3)." > release-output.log 2>&1
+          gh release create "$release_tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Enchantment Glint Outline ${mod_version} for Minecraft ${minecraft_version}" --notes "Enchantment Glint Outline ported to Minecraft ${minecraft_version} on Fabric.\n\n* Minecraft ${minecraft_version}, Fabric Loader 0.19.5, Fabric API 0.166.2+26.3\n* Rendering updated for the 26.3 render stack (com.mojang.renderpearl, UvMapping-based model submits, ItemQuads item submits, per-texture glint render types)\n* Java 25\n\nRequires Fabric API. Mod Menu + YACL optional (config screen)." > release-output.log 2>&1
           release_status=$?
           cat release-output.log
           if [ "$release_status" -ne 0 ]; then
