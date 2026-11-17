@@ -33,10 +33,34 @@ jobs:
           cat build-output.log
           if [ "$build_status" -ne 0 ]; then
             python3 - <<'PY'
+          import re
           from pathlib import Path
-          text = Path("build-output.log").read_text(errors="replace")[-8000:]
-          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=Gradle build output::{escaped}")
+
+          text = Path("build-output.log").read_text(errors="replace")
+          lines = text.splitlines()
+
+          def emit(title, body):
+              body = body[-3500:]
+              escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{escaped}")
+
+          # 1) one-line summary of every compiler error
+          errors = [l.strip() for l in lines if "error:" in l or l.strip().startswith("* What went wrong") or "FAILURE:" in l]
+          emit("Gradle errors summary", "\n".join(errors[:120]))
+
+          # 2) context around each error, packed into a few annotations
+          chunks, current = [], []
+          for i, line in enumerate(lines):
+              if "error:" in line:
+                  block = "\n".join(lines[i:i + 6])
+                  if sum(len(c) for c in current) + len(block) > 3000:
+                      chunks.append("\n\n".join(current))
+                      current = []
+                  current.append(block)
+          if current:
+              chunks.append("\n\n".join(current))
+          for n, chunk in enumerate(chunks[:8]):
+              emit(f"Gradle error context {n + 1}", chunk)
           PY
             exit "$build_status"
           fi

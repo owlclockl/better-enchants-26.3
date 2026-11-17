@@ -14,7 +14,7 @@ import net.enchantoutline.util.RenderLayerHelper;
 import net.fabricmc.api.ModInitializer;
 
 import net.minecraft.client.renderer.SubmitNodeCollector;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.UvMapping;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.entity.ThrownTridentRenderer;
@@ -119,7 +119,7 @@ public class EnchantmentGlintOutline implements ModInitializer {
 							collector.order(getGlintBatchingQueue()).submitCustomGeometry(matrixStack, glintLayer, (pose, vc) -> {
 								QuadHelper.renderCustomGeometryFromQuads(pose, vc, thickenedQuads, glintTint);
 							});
-							RenderType enchantLayer = RenderTypes.glint();
+							RenderType enchantLayer = Shaders.VANILLA_GLINT_ITEM;
 							collector.order(getGlintBatchingQueue()+1).submitCustomGeometry(matrixStack, enchantLayer, (pose, vc) -> {
 								QuadHelper.renderCustomGeometryFromQuads(pose, vc, thickenedQuads, glintTint);
 							});
@@ -135,7 +135,7 @@ public class EnchantmentGlintOutline implements ModInitializer {
 		//extra submitModel using a vanilla glint render type, so we detect it by render type instead.
 		//The SPECIAL_MODEL_COLLECTOR guard scopes this to SpecialModelRenderer#submit, which keeps it
 		//from colliding with the armour and thrown-trident handlers below.
-		RenderModelGlintCallback.EVENT.register((receiver, model, state, poseStack, renderType, light, overlay, tintedColor, sprite, outlineColor, crumblingOverlay) -> {
+		RenderModelGlintCallback.EVENT.register((receiver, model, state, poseStack, renderType, light, overlay, tintedColor, uvMapping, outlineColor) -> {
 			if(!config.isEnabled() || model instanceof HijackedModel || !isGlintRenderType(renderType)){
 				return InteractionResult.PASS;
 			}
@@ -156,15 +156,16 @@ public class EnchantmentGlintOutline implements ModInitializer {
 				return InteractionResult.PASS;
 			}
 
-			//The glint submit carries the *base* sprite, so the outline samples the item's own texture.
-			//TridentSpecialRenderer goes through the short submitModel overload and so has no sprite;
-			//fall back to its known texture there, as the thrown-trident handler already does.
-			RenderType textureSource = null;
-			if(sprite == null && renderedItem == Items.TRIDENT){
+			//26.3 glint render types bind the item's own texture as Sampler0, so the render type that is
+			//being submitted *is* the texture source. TridentSpecialRenderer goes through the short
+			//submitModel overload (no texture binding of its own), so fall back to its known texture
+			//there, as the thrown-trident handler already does.
+			RenderType textureSource = renderType;
+			if(RenderLayerHelper.getIdentifierFromRenderLayer(renderType) == null && renderedItem == Items.TRIDENT){
 				textureSource = model.renderType(ThrownTridentRenderer.TRIDENT_LOCATION);
 			}
 
-			boolean isDoubleSided = textureSource != null && RenderLayerHelper.isRenderLayerDoubleSided(textureSource);
+			boolean isDoubleSided = RenderLayerHelper.isRenderLayerDoubleSided(textureSource);
 
 			float scale = config.getScaleFactorFromOutlineSize(config.getOutlineSizeOverrideOrDefault(override, false));
 			HijackedModel thickModel = ModelHelper.getThickenedModel(model, layer -> Shaders.GLINT_CUTOUT_LAYER, scale);
@@ -172,24 +173,26 @@ public class EnchantmentGlintOutline implements ModInitializer {
 			if (config.getRenderSolidOverrideOrDefault(override, false)) {
 				int tint = config.getOutlineColorAsInt(config.getOutlineColorOverrideOrDefault(override));
 
-				RenderType colorLayer = outlineLayer(textureSource, sprite, COLOR_LAYERS, Shaders::createColorRenderLayerNoCull, Shaders::createColorRenderLayerCull, Shaders.COLOR_CUTOUT_LAYER, isDoubleSided);
-				RenderType zFixLayer = outlineLayer(textureSource, sprite, ZFIX_LAYERS, Shaders::createZFixRenderLayerNoCull, Shaders::createZFixRenderLayerCull, Shaders.ZFIX_CUTOUT_LAYER, isDoubleSided);
+				RenderType colorLayer = outlineLayer(textureSource, COLOR_LAYERS, Shaders::createColorRenderLayerNoCull, Shaders::createColorRenderLayerCull, Shaders.COLOR_CUTOUT_LAYER, isDoubleSided);
+				RenderType zFixLayer = outlineLayer(textureSource, ZFIX_LAYERS, Shaders::createZFixRenderLayerNoCull, Shaders::createZFixRenderLayerCull, Shaders.ZFIX_CUTOUT_LAYER, isDoubleSided);
 
-				collector.order(getColorBatchingQueue()).submitModel(thickModel, state, poseStack, colorLayer, Integer.MAX_VALUE, 0, tint, sprite, outlineColor, crumblingOverlay);
-				collector.submitModel(thickModel, state, poseStack, zFixLayer, Integer.MAX_VALUE, 0, tint, sprite, outlineColor, crumblingOverlay);
+				collector.order(getColorBatchingQueue()).submitModel(thickModel, state, poseStack, colorLayer, Integer.MAX_VALUE, 0, tint, uvMapping, outlineColor);
+				collector.submitModel(thickModel, state, poseStack, zFixLayer, Integer.MAX_VALUE, 0, tint, uvMapping, outlineColor);
 			} else {
-				RenderType glintLayer = outlineLayer(textureSource, sprite, GLINT_LAYERS, Shaders::createGlintRenderLayerNoCull, Shaders::createGlintRenderLayerCull, Shaders.GLINT_CUTOUT_LAYER, isDoubleSided);
+				RenderType glintLayer = outlineLayer(textureSource, GLINT_LAYERS, Shaders::createGlintRenderLayerNoCull, Shaders::createGlintRenderLayerCull, Shaders.GLINT_CUTOUT_LAYER, isDoubleSided);
 
-				collector.order(getGlintBatchingQueue()).submitModel(thickModel, state, poseStack, glintLayer, Integer.MAX_VALUE, 0, tintedColor, sprite, outlineColor, crumblingOverlay);
-				collector.order(getGlintBatchingQueue()+1).submitModel(thickModel, state, poseStack, RenderTypes.entityGlint(), Integer.MAX_VALUE, 0, tintedColor, sprite, outlineColor, crumblingOverlay);
+				collector.order(getGlintBatchingQueue()).submitModel(thickModel, state, poseStack, glintLayer, Integer.MAX_VALUE, 0, tintedColor, uvMapping, outlineColor);
+				collector.order(getGlintBatchingQueue()+1).submitModel(thickModel, state, poseStack, Shaders.VANILLA_GLINT_ENTITY, Integer.MAX_VALUE, 0, tintedColor, uvMapping, outlineColor);
 			}
 
 			return InteractionResult.PASS;
 		});
 
-		EquipmentRendererQueueEnchantedCallback.EVENT.register((( queueHolder, renderedStack, queue, texture, model, s, matrixStack, renderLayer, light, overlay, tintColor, sprite, outlineColor, crumblingOverlayCommand) -> {
+		EquipmentRendererQueueEnchantedCallback.EVENT.register((( queueHolder, renderedStack, queue, texture, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
 			//I can build this using the current renderLayer the model class is surprisingly simple. It just is made of a model part which I already am able to render an outline for. just build a new model every frame and we should be set
-			if(config.isEnabled()){
+			//26.3: armour glint is part of the layer render type now, so only the enchanted (glint) layer of a
+			//foiled piece of armour passes this check - exactly the layers that used to be glint submits.
+			if(config.isEnabled() && RenderLayerHelper.isGlintRenderType(renderLayer)){
 				@Nullable ItemOverride override = null;
 				if(renderedStack != null){
 					override = getOverrideFromNullableItem(config::getArmorOverride, renderedStack.getItem());
@@ -208,24 +211,26 @@ public class EnchantmentGlintOutline implements ModInitializer {
 
 						HijackedModel thickColorModel = ModelHelper.getThickenedModel(model, layer -> Shaders.COLOR_CUTOUT_LAYER, scale);
 
-						queueHolder.order(getColorBatchingQueue()).submitModel(thickColorModel, s, matrixStack, colorLayer, Integer.MAX_VALUE, 0, tint, sprite, outlineColor, crumblingOverlayCommand);
+						queueHolder.order(getColorBatchingQueue()).submitModel(thickColorModel, s, matrixStack, colorLayer, Integer.MAX_VALUE, 0, tint, uvMapping, outlineColor);
 					}
 					else{
 						RenderType glintZLayer = RenderLayerHelper.renderLayerFromRenderLayerDoubleSided(garbageHackPatchLayer, GLINT_LAYERS, Shaders::createGlintRenderLayerNoCull, Shaders::createGlintRenderLayerCull, Shaders.GLINT_CUTOUT_LAYER, true);
 
 						HijackedModel thickGlintZModel = ModelHelper.getThickenedModel(model, layer -> Shaders.GLINT_CUTOUT_LAYER, scale);
 
-						queueHolder.order(getGlintBatchingQueue()).submitModel(thickGlintZModel, s, matrixStack, glintZLayer, light, overlay, tintColor, sprite, outlineColor, crumblingOverlayCommand);
-						queueHolder.order(getGlintBatchingQueue()+1).submitModel(thickGlintZModel, s, matrixStack, Shaders.ARMOR_ENTITY_GLINT_FIX, light, overlay, tintColor, sprite, outlineColor, crumblingOverlayCommand);
+						queueHolder.order(getGlintBatchingQueue()).submitModel(thickGlintZModel, s, matrixStack, glintZLayer, light, overlay, tintColor, uvMapping, outlineColor);
+						queueHolder.order(getGlintBatchingQueue()+1).submitModel(thickGlintZModel, s, matrixStack, Shaders.ARMOR_ENTITY_GLINT_FIX, light, overlay, tintColor, uvMapping, outlineColor);
 					}
 				}
 			}
 			return InteractionResult.PASS;
 		}));
 
-		TridentEntityRendererQueueEnchantedCallback.EVENT.register(((queueHolder, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, sprite, outlineColor, crumblingOverlayCommand) -> {
+		TridentEntityRendererQueueEnchantedCallback.EVENT.register(((queueHolder, queue, model, s, matrixStack, renderLayer, light, overlay, tintColor, uvMapping, outlineColor) -> {
 			if(config.isEnabled()){
-				if(renderLayer.equals(RenderTypes.entityGlint())){
+				//26.3 submits an enchanted trident with RenderTypes#entitySolidGlint(texture) instead of a
+				//separate entity glint submit, so detect the glint pipeline rather than a singleton type.
+				if(RenderLayerHelper.isGlintRenderType(renderLayer)){
 					@Nullable ItemOverride override = getOverrideFromNullableItem(config::getItemOverride, Items.TRIDENT);
 					if(override == null || override.shouldRender()){
 						float scale = config.getScaleFactorFromOutlineSize(config.getOutlineSizeOverrideOrDefault(override, true));
@@ -237,7 +242,7 @@ public class EnchantmentGlintOutline implements ModInitializer {
 
 							HijackedModel thickColorModel = ModelHelper.getThickenedModel(model, layer -> Shaders.COLOR_CUTOUT_LAYER, scale);
 
-							queueHolder.order(getColorBatchingQueue()).submitModel(thickColorModel, s, matrixStack, colorLayer, Integer.MAX_VALUE, 0, tint, sprite, outlineColor, crumblingOverlayCommand);
+							queueHolder.order(getColorBatchingQueue()).submitModel(thickColorModel, s, matrixStack, colorLayer, Integer.MAX_VALUE, 0, tint, uvMapping, outlineColor);
 						}
 						else{
 							int tint = config.getOutlineColorAsInt(config.getOutlineColorOverrideOrDefault(override));
@@ -246,8 +251,8 @@ public class EnchantmentGlintOutline implements ModInitializer {
 
 							HijackedModel thickGlintZModel = ModelHelper.getThickenedModel(model, layer -> Shaders.GLINT_CUTOUT_LAYER, scale);
 
-							queueHolder.order(getGlintBatchingQueue()).submitModel(thickGlintZModel, s, matrixStack, glintZLayer, Integer.MAX_VALUE, 0, tint, sprite, outlineColor, crumblingOverlayCommand);
-							queueHolder.order(getGlintBatchingQueue()+1).submitModel(thickGlintZModel, s, matrixStack, RenderTypes.entityGlint(), Integer.MAX_VALUE, 0, 0, sprite, outlineColor, crumblingOverlayCommand);
+							queueHolder.order(getGlintBatchingQueue()).submitModel(thickGlintZModel, s, matrixStack, glintZLayer, Integer.MAX_VALUE, 0, tint, uvMapping, outlineColor);
+							queueHolder.order(getGlintBatchingQueue()+1).submitModel(thickGlintZModel, s, matrixStack, Shaders.VANILLA_GLINT_ENTITY, Integer.MAX_VALUE, 0, 0, uvMapping, outlineColor);
 						}
 					}
 				}
@@ -309,14 +314,12 @@ public class EnchantmentGlintOutline implements ModInitializer {
 	}
 
 	/**
-	 * 26.2: foil is no longer a boolean on the submit, it is simply "this model is being submitted with
-	 * one of the vanilla glint render types". Covers every glint variant vanilla can hand us.
+	 * 26.3: foil is still "this model is being submitted with a glint render type", but glint render
+	 * types are per-texture functions now instead of singletons, so the check moved into
+	 * {@link RenderLayerHelper#isGlintRenderType(RenderType)} (glint pipeline define / GlintSampler).
 	 */
 	private static boolean isGlintRenderType(RenderType renderType){
-		return renderType == RenderTypes.entityGlint()
-				|| renderType == RenderTypes.glint()
-				|| renderType == RenderTypes.glintTranslucent()
-				|| renderType == RenderTypes.armorEntityGlint();
+		return RenderLayerHelper.isGlintRenderType(renderType);
 	}
 
 	@Nullable
@@ -332,16 +335,13 @@ public class EnchantmentGlintOutline implements ModInitializer {
 	 * Builds the outline render type from whichever texture source we managed to recover - a render
 	 * type when we know one, otherwise the sprite the glint submit carried, otherwise the fallback.
 	 */
-	private static RenderType outlineLayer(@Nullable RenderType textureSource, @Nullable TextureAtlasSprite sprite,
+	private static RenderType outlineLayer(@Nullable RenderType textureSource,
 										   CustomRenderLayers layers,
 										   java.util.function.Function<Map<String, Identifier>, RenderType> noCullFactory,
 										   java.util.function.Function<Map<String, Identifier>, RenderType> cullFactory,
 										   RenderType fallback, boolean isDoubleSided){
 		if(textureSource != null){
 			return RenderLayerHelper.renderLayerFromRenderLayerDoubleSided(textureSource, layers, noCullFactory, cullFactory, fallback, isDoubleSided);
-		}
-		if(sprite != null){
-			return RenderLayerHelper.renderLayerFromSpriteDoubleSided(sprite, layers, noCullFactory, cullFactory, fallback, isDoubleSided);
 		}
 		return fallback;
 	}
