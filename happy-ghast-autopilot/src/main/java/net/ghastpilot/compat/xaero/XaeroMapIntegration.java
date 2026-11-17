@@ -83,6 +83,7 @@ public final class XaeroMapIntegration {
 				&& FlightTarget.normalizeDimension(dimension)
 				.equals(FlightTarget.normalizeDimension(AutopilotController.getPlayerDimension(client)));
 
+		IRightClickableElement clickableMap = (IRightClickableElement) (Object) guiMap;
 		List<RightClickOption> toInsert = new ArrayList<>(3);
 
 		// Option 1: Fly at safe cruise altitude to (X, Z)
@@ -90,7 +91,7 @@ public final class XaeroMapIntegration {
 				? "happy_ghast_autopilot.xaero.fly_here"
 				: "happy_ghast_autopilot.xaero.set_target";
 		String flyLabel = escapePercent(Component.translatable(flyKey, targetX, targetZ).getString());
-		toInsert.add(new RightClickOption(flyLabel, options.size(), guiMap) {
+		toInsert.add(new RightClickOption(flyLabel, options.size(), clickableMap) {
 			@Override
 			public void onAction(Screen screen) {
 				selectFromMap(new FlightTarget(targetX, null, targetZ, dimension, null), screen);
@@ -103,7 +104,7 @@ public final class XaeroMapIntegration {
 					? "happy_ghast_autopilot.xaero.fly_here_y"
 					: "happy_ghast_autopilot.xaero.set_target_y";
 			String landLabel = escapePercent(Component.translatable(landKey, targetX, landingY, targetZ).getString());
-			toInsert.add(new RightClickOption(landLabel, options.size() + 1, guiMap) {
+			toInsert.add(new RightClickOption(landLabel, options.size() + 1, clickableMap) {
 				@Override
 				public void onAction(Screen screen) {
 					AutopilotConfig.get().descendOnArrival = true;
@@ -117,7 +118,7 @@ public final class XaeroMapIntegration {
 			String clearLabel = escapePercent(
 					Component.translatable("happy_ghast_autopilot.xaero.clear_target").getString()
 			);
-			toInsert.add(new RightClickOption(clearLabel, options.size() + toInsert.size(), guiMap) {
+			toInsert.add(new RightClickOption(clearLabel, options.size() + toInsert.size(), clickableMap) {
 				@Override
 				public void onAction(Screen screen) {
 					AutopilotController.clearTarget(true);
@@ -143,7 +144,7 @@ public final class XaeroMapIntegration {
 		final String wpName = waypoint.getName();
 
 		Minecraft client = Minecraft.getInstance();
-		Screen currentScreen = ScreenCompat.getCurrentScreen(client);
+		Object currentScreen = ScreenCompat.getCurrentScreen(client);
 		final String dimension = (currentScreen instanceof GuiMap guiMap)
 				? resolveMapDimension(guiMap)
 				: AutopilotController.getPlayerDimension(client);
@@ -152,7 +153,7 @@ public final class XaeroMapIntegration {
 		RightClickOption option = new RightClickOption(label, options.size(), target) {
 			@Override
 			public void onAction(Screen screen) {
-				String dim = (screen instanceof GuiMap gm) ? resolveMapDimension(gm) : dimension;
+				String dim = ((Object) screen instanceof GuiMap gm) ? resolveMapDimension(gm) : dimension;
 				selectFromMap(new FlightTarget(wx, wy, wz, dim, wpName), screen);
 			}
 		};

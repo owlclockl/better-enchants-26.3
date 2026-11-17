@@ -14,14 +14,12 @@ public final class AutopilotKeybinds {
 
 	public static final KeyMapping TOGGLE_AUTOPILOT = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key." + HappyGhastAutopilotClient.MOD_ID + ".toggle",
-			InputConstants.Type.KEYSYM,
 			InputConstants.KEY_G,
 			CATEGORY
 	));
 
 	public static final KeyMapping OPEN_MENU = KeyMappingHelper.registerKeyMapping(new KeyMapping(
 			"key." + HappyGhastAutopilotClient.MOD_ID + ".open_menu",
-			InputConstants.Type.KEYSYM,
 			InputConstants.KEY_H,
 			CATEGORY
 	));

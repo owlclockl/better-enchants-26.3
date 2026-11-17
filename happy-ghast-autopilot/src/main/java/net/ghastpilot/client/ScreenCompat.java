@@ -1,6 +1,5 @@
 package net.ghastpilot.client;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -22,33 +21,25 @@ public final class ScreenCompat {
 	}
 
 	public static boolean isHudHidden(Minecraft client) {
-		return client.options.hideGui;
+		return client.gui.hud.isHidden();
 	}
 
+	/**
+	 * Returns true if the player is actively holding any manual WASD movement key while no GUI screen is open.
+	 * Works for both keyboard and mouse-button keybinds because autopilot steers via HappyGhast directly
+	 * without mutating Options key mappings.
+	 */
 	public static boolean isMovementKeyPhysicallyPressed(Minecraft client) {
 		if (getCurrentScreen(client) != null) {
 			return false;
 		}
-		return isKeyPhysicallyDown(client, client.options.keyUp)
-				|| isKeyPhysicallyDown(client, client.options.keyDown)
-				|| isKeyPhysicallyDown(client, client.options.keyLeft)
-				|| isKeyPhysicallyDown(client, client.options.keyRight);
+		return isDown(client.options.keyUp)
+				|| isDown(client.options.keyDown)
+				|| isDown(client.options.keyLeft)
+				|| isDown(client.options.keyRight);
 	}
 
-	private static boolean isKeyPhysicallyDown(Minecraft client, KeyMapping mapping) {
-		if (mapping == null || mapping.isUnbound()) {
-			return false;
-		}
-		if (mapping.isDown()) {
-			return true;
-		}
-		try {
-			InputConstants.Key key = KeyMapping.getKey(mapping.saveString());
-			if (key != null && key.getType() == InputConstants.Type.KEYSYM && key.getValue() > 0) {
-				return InputConstants.isKeyDown(client.getWindow(), key.getValue());
-			}
-		} catch (Exception ignored) {
-		}
-		return false;
+	private static boolean isDown(KeyMapping mapping) {
+		return mapping != null && !mapping.isUnbound() && mapping.isDown();
 	}
 }

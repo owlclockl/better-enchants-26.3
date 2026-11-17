@@ -474,6 +474,6 @@ public final class AutopilotController {
 		if (client == null || client.player == null) {
 			return;
 		}
-		client.gui.setOverlayMessage(body, false);
+		client.gui.hud.setOverlayMessage(body, false);
 	}
 }
