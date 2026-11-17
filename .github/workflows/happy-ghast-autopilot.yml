@@ -45,16 +45,48 @@ jobs:
           build_status=$?
           cat build-output.log
           if [ "$build_status" -ne 0 ]; then
-            echo "=== COMPILER / GRADLE ERROR SUMMARY ==="
-            grep -n -C 4 -E "error:|FAILURE:|What went wrong|Exception" build-output.log | tail -n 160 || true
-            # Also inspect real 26.3 signatures if compilation failed on a shifted API
-            mc_jar=$(find ~/.gradle/caches -name "*minecraft*26.3*.jar" ! -name "*-sources*" | head -n 1)
-            if [ -n "$mc_jar" ]; then
-              echo "=== MC JAR: $mc_jar ==="
-              javap -cp "$mc_jar" -p net.minecraft.client.Minecraft 2>/dev/null | grep -E "screen|Screen|gui|window" | head -n 40 || true
-              javap -cp "$mc_jar" -p net.minecraft.client.gui.Gui 2>/dev/null | grep -E "screen|Screen|Overlay|hud" | head -n 40 || true
-              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast 2>/dev/null || true
-            fi
+            {
+              mc_jar=$(find ~/.gradle/caches -type f -name "*.jar" ! -name "*-sources.jar" -exec sh -c 'jar tf "$1" 2>/dev/null | grep -q "^net/minecraft/world/entity/animal/happyghast/HappyGhast.class$"' _ {} \; -print -quit)
+              if [ -n "$mc_jar" ]; then
+                echo "=== Minecraft methods ==="
+                javap -cp "$mc_jar" -p net.minecraft.client.Minecraft 2>/dev/null | grep -E "screen|Screen|gui|getWindow" | head -n 30
+                echo "=== Gui methods ==="
+                javap -cp "$mc_jar" -p net.minecraft.client.gui.Gui 2>/dev/null | grep -E "screen|Screen|Overlay|hud|Hidden" | head -n 30
+                echo "=== Options hideGui ==="
+                javap -cp "$mc_jar" -p net.minecraft.client.Options 2>/dev/null | grep -E "hideGui|keyUp|keyDown" | head -n 20
+                echo "=== HappyGhast ==="
+                javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast 2>/dev/null | head -n 50
+              fi
+            } > api-probe.log 2>&1
+            python3 - <<'PY'
+          from pathlib import Path
+
+          def emit(level, title, body):
+              body = body[-3500:]
+              escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::{level} title={title}::{escaped}")
+
+          lines = Path("build-output.log").read_text(errors="replace").splitlines()
+          errors = [l for l in lines if ("error:" in l or "FAILURE:" in l or l.strip().startswith("* ") or "FAILED" in l or "Caused by:" in l)]
+          emit("error", "Errors summary", "\n".join(errors[:80]) or "\n".join(lines[-60:]))
+
+          chunks, cur = [], []
+          for i, l in enumerate(lines):
+              if "error:" in l or "FAILED" in l:
+                  block = "\n".join(lines[max(0, i-1):i+5])
+                  if sum(len(x) for x in cur) + len(block) > 3000:
+                      chunks.append("\n\n".join(cur))
+                      cur = []
+                  cur.append(block)
+          if cur:
+              chunks.append("\n\n".join(cur))
+          for idx, ch in enumerate(chunks[:5]):
+              emit("error", f"Error context {idx+1}", ch)
+
+          probe = Path("api-probe.log").read_text(errors="replace").strip()
+          if probe:
+              emit("notice", "MC 26.3 API probe", probe[:3500])
+          PY
             exit "$build_status"
           fi
 
@@ -62,40 +94,65 @@ jobs:
         if: success()
         shell: bash
         run: |
-          set -e
-          echo "=== Built artifacts ==="
-          ls -lh build/libs
+          set +e
           main_jar=$(find build/libs -maxdepth 1 -type f -name 'happy-ghast-autopilot-*.jar' ! -name '*-sources.jar' -print -quit)
-          test -n "$main_jar"
-          echo "=== JAR contents ==="
-          jar tf "$main_jar"
-          echo "=== fabric.mod.json ==="
-          unzip -p "$main_jar" fabric.mod.json
+          test -n "$main_jar" || exit 1
 
-          echo "=== Verify HappyGhast bytecode (26.3) ==="
+          {
+            ls -lh build/libs
+            echo "--- JAR entries ---"
+            jar tf "$main_jar"
+            echo "--- Test results ---"
+            grep -E "testsuite " build/test-results/test/*.xml 2>/dev/null || true
+          } > report-jar.txt 2>&1
+
           mc_jar=$(find ~/.gradle/caches -type f -name "*.jar" ! -name "*-sources.jar" -exec sh -c 'jar tf "$1" 2>/dev/null | grep -q "^net/minecraft/world/entity/animal/happyghast/HappyGhast.class$"' _ {} \; -print -quit)
-          echo "Found MC jar: $mc_jar"
-          if [ -n "$mc_jar" ]; then
-            javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | grep -A 35 -E "tickRidden|getRiddenInput|getControllingPassenger|createPlayerRotation|travelRidden" || true
-          fi
+          {
+            echo "MC jar: $mc_jar"
+            if [ -n "$mc_jar" ]; then
+              echo "--- HappyGhast methods ---"
+              javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast
+              echo "--- HappyGhast tickRidden & getRiddenInput & getControllingPassenger bytecode ---"
+              javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | awk '/(tickRidden|getRiddenInput|getControllingPassenger|createPlayerRotation|getRiddenSpeed)\(/{flag=1; c=0} flag{print; c++; if(c>45 || /^$/){flag=0}}'
+            fi
+          } > report-ghast.txt 2>&1
 
-          echo "=== Verify Xaero's World Map 26.3 (GuiMap, WaypointReader, Waypoint, MapWorld) ==="
-          xaero_jar=$(find ~/.gradle/caches -type f -name "*NcUtCpym*.jar" -o -name "*xaeroworldmap*.jar" | head -n 1)
-          echo "Found Xaero jar: $xaero_jar"
-          if [ -n "$xaero_jar" ]; then
-            echo "--- GuiMap fields & target methods ---"
-            javap -cp "$xaero_jar" -p xaero.map.gui.GuiMap | grep -E "rightClick|mouseBlock|camera|scale|screenScale|mapProcessor|getRightClickOptions|renderPreDropdown|onInputPress" || true
-            echo "--- GuiMap getRightClickOptions bytecode (head) ---"
-            javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | grep -A 45 "getRightClickOptions(" | head -n 50 || true
-            echo "--- WaypointReader ---"
-            javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader || true
-            echo "--- Waypoint ---"
-            javap -cp "$xaero_jar" -p xaero.map.mods.gui.Waypoint || true
-            echo "--- MapWorld ---"
-            javap -cp "$xaero_jar" -p xaero.map.world.MapWorld | grep -E "Dimension|dimension|Scale|Div" || true
-            echo "--- MapDimension ---"
-            javap -cp "$xaero_jar" -p xaero.map.world.MapDimension | grep -E "Dim|Scale|Div|calculate" || true
-          fi
+          xaero_jar=$(find ~/.gradle/caches -type f \( -name "*NcUtCpym*.jar" -o -name "*xaeroworldmap*.jar" \) ! -name "*-sources.jar" | head -n 1)
+          {
+            echo "Xaero jar: $xaero_jar"
+            if [ -n "$xaero_jar" ]; then
+              echo "--- GuiMap relevant fields & methods ---"
+              javap -cp "$xaero_jar" -p xaero.map.gui.GuiMap | grep -E "rightClick|mouseBlock|camera|scale|screenScale|mapProcessor|getRightClickOptions|renderPreDropdown|getMapProcessor|destScale|Dimension"
+              echo "--- WaypointReader ---"
+              javap -cp "$xaero_jar" -p xaero.map.mods.gui.WaypointReader
+              echo "--- Waypoint ---"
+              javap -cp "$xaero_jar" -p xaero.map.mods.gui.Waypoint
+              echo "--- MapWorld ---"
+              javap -cp "$xaero_jar" -p xaero.map.world.MapWorld | grep -E "Dimension|dimension|Scale|Div"
+              echo "--- RightClickOption ---"
+              javap -cp "$xaero_jar" -p xaero.map.gui.dropdown.rightclick.RightClickOption
+            fi
+          } > report-xaero.txt 2>&1
+
+          {
+            if [ -n "$xaero_jar" ]; then
+              echo "--- GuiMap getRightClickOptions & mouseClicked rightClick assignment ---"
+              javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | grep -B 4 -A 6 "rightClick" | head -n 90
+            fi
+          } > report-xaero2.txt 2>&1
+
+          python3 - <<'PY'
+          from pathlib import Path
+          def emit(title, path):
+              t = Path(path).read_text(errors="replace")[:3500]
+              esc = t.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::notice title={title}::{esc}")
+          emit("JAR and Tests", "report-jar.txt")
+          emit("HappyGhast 26.3 bytecode", "report-ghast.txt")
+          emit("Xaero 26.3 API", "report-xaero.txt")
+          emit("Xaero rightClick bytecode", "report-xaero2.txt")
+          PY
+          exit 0
 
       - name: Upload build artifacts
         if: success()
@@ -127,14 +184,16 @@ jobs:
         working-directory: happy-ghast-autopilot
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
           mod_version=$(awk -F= '$1 == "mod_version" {print $2}' gradle.properties)
           minecraft_version=$(awk -F= '$1 == "minecraft_version" {print $2}' gradle.properties)
           release_tag="happy-ghast-autopilot-${mod_version}+${minecraft_version}"
           artifact=$(find build/libs -maxdepth 1 -type f -name 'happy-ghast-autopilot-*.jar' ! -name '*-sources.jar' -print -quit)
-          test -n "$artifact"
-          echo "Publishing release $release_tag with $artifact ($(stat -c%s "$artifact") bytes)"
-          sha256sum "$artifact"
+          if [ -z "$artifact" ]; then
+            echo "::error title=Release error::No mod jar found in build/libs"
+            exit 1
+          fi
+          sha=$(sha256sum "$artifact" | awk '{print $1}')
 
           cat > release-notes.md <<EOF
           **Happy Ghast Autopilot ${mod_version} — автопилот для добрых гастов (Minecraft ${minecraft_version}, Fabric).**
@@ -143,36 +202,45 @@ jobs:
           * Minecraft **${minecraft_version}**
           * Fabric Loader **0.19.5+**, Fabric API **0.166.2+26.3**
           * Java **25**
-          * **Xaero's World Map** (поддержка 26.3 — опционально, рекомендуется) + поддержка меток Xaero's Minimap на карте мира
+          * **Xaero's World Map** (для 26.3 — рекомендуется для выбора точки на карте) + поддержка меток Xaero's Minimap на карте мира
           * **Mod Menu** (опционально — открывает меню настроек)
-          * Полностью клиентский мод — работает и в одиночной игре, и на серверах.
+          * Клиентский мод — работает и в одиночной игре, и на серверах.
 
           ### Возможности
-          * **Выбор точки прямо на Xaero's World Map:** нажмите **ПКМ** по любому месту на карте мира и выберите **«Лететь на гасте (X, Z)»** (крейсерский полёт) или **«Лететь с посадкой (X, Y, Z)»** (плавное снижение к поверхности в точке прибытия). Также можно нажать ПКМ по любой метке (вейпоинту) на карте!
-          * **Маршрут и метка на карте:** рисует пунктирную линию полёта и прицел цели с дистанцией прямо на Xaero's World Map.
-          * **Умный полёт и обход препятствий:** автоматический набор высоты над горами/лесами, обход препятствий в Незере и под потолками, защита от лавы и непрогруженных чанков, плавное торможение у цели.
-          * **Свободный обзор (Free Look):** крутите камерой, открывайте инвентарь, чат или карту мира — гаст продолжает ровно лететь к цели. При нажатии WASD автопилот мгновенно встаёт на паузу.
-          * **Удобный HUD, меню и команды:** отображение дистанции, скорости и времени прибытия (ETA), русская и английская локализация.
+          * **Выбор точки прямо на Xaero's World Map:** откройте карту мира Xaero, нажмите **ПКМ** по нужной точке и выберите **«Лететь на гасте (X, Z)»** (полёт на крейсерской высоте) или **«Лететь с посадкой (X, Y, Z)»** (плавное снижение к поверхности в точке прибытия). Также работает **ПКМ по любой метке (вейпоинту)** на карте!
+          * **Маршрут и прицел на карте:** отображает пунктирную линию полёта и маркер точки назначения с дистанцией прямо на Xaero's World Map.
+          * **Умный автопилот и обход препятствий:** автоматический набор высоты над горами и лесами, безопасный обход препятствий в Незере и под потолками, защита от лавы/огня и непрогруженных чанков, плавное торможение у цели.
+          * **Свободный обзор (Free Look):** спокойно осматривайтесь вокруг, открывайте инвентарь, чат или Xaero's World Map прямо в полёте. Нажатие WASD мгновенно ставит автопилот на паузу.
+          * **HUD, меню и команды:** панель с дистанцией, скоростью (бл/с) и расчётным временем прибытия (ETA), русская и английская локализация.
 
           ### Управление
-          * **ПКМ на Xaero's World Map** → *«Лететь на гасте»* / *«Лететь с посадкой»* / *«Лететь на гасте к метке»*
-          * **\`G\`** — включить / поставить на паузу автопилот (перенастраивается в настройках управления)
-          * **\`H\`** — открыть меню автопилота (ввод координат, вставка из буфера F3+C / вейпоинтов Xaero, недавние цели, настройки)
-          * **\`/gp <x> <z>\`** или **\`/gp <x> <y> <z>\`** — полететь к координатам (\`/gp stop\`, \`/gp resume\`, \`/gp clear\`, \`/gp altitude <y|auto>\`, \`/gp freelook <true|false>\`, \`/gp status\`)
+          * **ПКМ на Xaero's World Map** — выбрать точку полёта / метку / сбросить цель
+          * **\`G\`** — включить / поставить на паузу автопилот *(перенастраивается в управлении)*
+          * **\`H\`** — открыть меню автопилота *(ввод координат, вставка F3+C и вейпоинтов Xaero из буфера, недавние цели, настройки)*
+          * **\`/gp <x> <z>\`** или **\`/gp <x> <y> <z>\`** — задать координаты и полететь (\`/gp stop\`, \`/gp resume\`, \`/gp clear\`, \`/gp altitude <y|auto>\`, \`/gp clearance <блоки>\`, \`/gp freelook <true|false>\`, \`/gp descend <true|false>\`, \`/gp status\`)
 
           ### Установка
-          Скопируйте \`happy-ghast-autopilot-${mod_version}.jar\` в папку \`.minecraft/mods/\` (нужен Fabric Loader 0.19.5+ и Fabric API для 26.3; для выбора точки на карте — Xaero's World Map для 26.3).
+          Поместите \`happy-ghast-autopilot-${mod_version}.jar\` в папку \`.minecraft/mods/\` (требуются Fabric Loader 0.19.5+ и Fabric API для Minecraft 26.3; для выбора точки на карте — Xaero's World Map для 26.3).
+
+          \`SHA-256: ${sha}\`
           EOF
           sed -i 's/^          //' release-notes.md
 
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$release_tag" "$artifact" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" \
-              --title "Happy Ghast Autopilot ${mod_version} for Minecraft ${minecraft_version}" \
-              --notes-file release-notes.md
+            gh release upload "$release_tag" "$artifact" --clobber --repo "$GITHUB_REPOSITORY" > release.log 2>&1 \
+              && gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" \
+                --title "Happy Ghast Autopilot ${mod_version} for Minecraft ${minecraft_version}" \
+                --notes-file release-notes.md >> release.log 2>&1
+            st=$?
           else
             gh release create "$release_tag" "$artifact" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Happy Ghast Autopilot ${mod_version} for Minecraft ${minecraft_version}" \
-              --notes-file release-notes.md
+              --notes-file release-notes.md > release.log 2>&1
+            st=$?
+          fi
+          cat release.log
+          if [ "$st" -ne 0 ]; then
+            python3 -c "import pathlib; t=pathlib.Path('release.log').read_text(errors='replace')[-3000:]; print('::error title=Release failed::'+t.replace('%','%25').replace(chr(13),'%0D').replace(chr(10),'%0A'))"
+            exit "$st"
           fi
