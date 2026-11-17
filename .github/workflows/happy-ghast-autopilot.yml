@@ -114,14 +114,15 @@ jobs:
               echo "--- HappyGhast ridden methods ---"
               javap -cp "$mc_jar" -p net.minecraft.world.entity.animal.happyghast.HappyGhast | grep -iE "ridden|travel|rot|control|passeng|harness|armor|still|speed|fly"
               echo "--- HappyGhast bytecode for travel / tickRidden / getRiddenInput / getControllingPassenger / createPlayerRotation ---"
-              javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast | python3 -c '
-import sys, re
-txt = sys.stdin.read()
-for block in txt.split("\n\n"):
-    first = block.splitlines()[0] if block.splitlines() else ""
-    if any(k in first for k in ("travel(", "tickRidden(", "getRiddenInput(", "getControllingPassenger(", "createPlayerRotation(", "getRiddenSpeed(", "createAttributes(")):
-        print(block + "\n")
-'
+              javap -cp "$mc_jar" -c -p net.minecraft.world.entity.animal.happyghast.HappyGhast > raw-ghast.txt
+              python3 - <<'PY'
+          from pathlib import Path
+          txt = Path("raw-ghast.txt").read_text(errors="replace")
+          for block in txt.split("\n\n"):
+              first = block.splitlines()[0] if block.splitlines() else ""
+              if any(k in first for k in ("travel(", "tickRidden(", "getRiddenInput(", "getControllingPassenger(", "createPlayerRotation(", "getRiddenSpeed(", "createAttributes(")):
+                  print(block + "\n")
+          PY
             fi
           } > report-ghast.txt 2>&1
 
@@ -142,14 +143,15 @@ for block in txt.split("\n\n"):
           {
             if [ -n "$xaero_jar" ]; then
               echo "--- GuiMap getRightClickOptions bytecode ---"
-              javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap | python3 -c '
-import sys
-txt = sys.stdin.read()
-for block in txt.split("\n\n"):
-    first = block.splitlines()[0] if block.splitlines() else ""
-    if "getRightClickOptions(" in first or "teleport(" in first:
-        print(block[:2400] + "\n")
-'
+              javap -cp "$xaero_jar" -c -p xaero.map.gui.GuiMap > raw-guimap.txt
+              python3 - <<'PY'
+          from pathlib import Path
+          txt = Path("raw-guimap.txt").read_text(errors="replace")
+          for block in txt.split("\n\n"):
+              first = block.splitlines()[0] if block.splitlines() else ""
+              if "getRightClickOptions(" in first or "teleport(" in first:
+                  print(block[:2400] + "\n")
+          PY
             fi
           } > report-xaero2.txt 2>&1
 
