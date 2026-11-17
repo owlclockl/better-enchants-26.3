@@ -60,18 +60,31 @@ public final class WorldScanner {
 		double minY = level.getMinY();
 		double maxY = level.getMaxY();
 
-		// 2. Vertical clearance above (protects both ghast top and seated riders from suffocation!)
-		boolean canAscend = fullBox.maxY + 3.0 < maxY - 2.0
-				&& isBoxSafe(level, ghast, fullBox.move(0.0, 1.4, 0.0))
-				&& isBoxSafe(level, ghast, fullBox.move(0.0, 2.8, 0.0));
+		// 2. Vertical clearance above: check strictly the airspace slice above the ghast (+ rider headroom)
+		// so standing directly beside a wall, tree, or docking tower never falsely blocks vertical takeoff.
+		AABB upperSlice = new AABB(
+				ghastBox.minX + 0.02,
+				ghastBox.maxY,
+				ghastBox.minZ + 0.02,
+				ghastBox.maxX - 0.02,
+				ghastBox.maxY + RIDER_HEADROOM + 2.4,
+				ghastBox.maxZ - 0.02
+		);
+		boolean canAscend = upperSlice.maxY < maxY - 1.5 && isBoxSafe(level, ghast, upperSlice);
 
 		// 3. Detect dimension ceiling (Nether) or local overhead roof (cave / floating island / bridge)
 		boolean hasCeiling = level.dimensionType().hasCeiling() || hasOverheadRoof(level, ghast.getX(), fullBox.maxY, ghast.getZ());
 
 		// 4. Downward clearance, ground height & hazard (lava / fire / void) check
-		AABB lowerProbe = ghastBox.inflate(0.25, 0.0, 0.25);
-		boolean canDescend = ghastBox.minY - 1.8 > minY + 4.0
-				&& isBoxSafe(level, ghast, lowerProbe.move(0.0, -1.4, 0.0));
+		AABB lowerSlice = new AABB(
+				ghastBox.minX + 0.02,
+				ghastBox.minY - 1.5,
+				ghastBox.minZ + 0.02,
+				ghastBox.maxX - 0.02,
+				ghastBox.minY - 0.02,
+				ghastBox.maxZ - 0.02
+		);
+		boolean canDescend = lowerSlice.minY > minY + 4.0 && isBoxSafe(level, ghast, lowerSlice);
 
 		double groundBelowY = Double.NaN;
 		boolean hazardBelow = ghastBox.minY < minY + 6.0;
